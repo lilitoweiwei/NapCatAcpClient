@@ -29,6 +29,24 @@ See `config.toml` for all options. Key settings:
 
 In group chats, the bot must be @-mentioned to respond.
 
+## Deploy as System Service
+
+To run nochan as a systemd service with auto-start on boot (Linux):
+
+```bash
+sudo bash scripts/install-service.sh
+```
+
+Options: `--user USER`, `--project-dir DIR`, `--uv-path PATH` (all auto-detected by default).
+
+After installation:
+
+```bash
+sudo systemctl start nochan          # Start now
+sudo systemctl status nochan         # Check status
+journalctl -u nochan -f              # Follow live logs
+```
+
 ## Development
 
 Run the following commands to ensure code quality (same as CI):

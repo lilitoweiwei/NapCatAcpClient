@@ -1,0 +1,10 @@
+[project]
+name = "nochan"
+version = "0.1.0"
+description = "NapCatOpenCodeChannel - Bridge between NapCatQQ and OpenCode AI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "websockets",
+    "aiosqlite",
+]

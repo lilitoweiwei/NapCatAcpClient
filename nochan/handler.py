@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from nochan.command import HELP_TEXT, parse_command
 from nochan.converter import ParsedMessage, onebot_to_internal
 from nochan.opencode import SubprocessOpenCodeBackend
-from nochan.prompt import build_prompt
+from nochan.prompt import PromptBuilder
 from nochan.session import SessionManager
 
 logger = logging.getLogger("nochan.handler")
@@ -29,12 +29,15 @@ class MessageHandler:
         self,
         session_manager: SessionManager,
         opencode_backend: SubprocessOpenCodeBackend,
+        prompt_builder: PromptBuilder,
         reply_fn: ReplyFn,
     ) -> None:
         # Session manager for chat-to-opencode session mapping
         self._session_manager = session_manager
         # OpenCode backend for sending prompts and receiving AI responses
         self._opencode_backend = opencode_backend
+        # Prompt builder for constructing context-enriched prompts
+        self._prompt_builder = prompt_builder
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
 
@@ -79,8 +82,9 @@ class MessageHandler:
             if session is None:
                 session = await self._session_manager.create_session(parsed.chat_id)
 
-            # Step 5: Build prompt with context
-            prompt = build_prompt(parsed)
+            # Step 5: Build prompt with context (include session_init on first message)
+            is_new_session = session.opencode_session_id is None
+            prompt = self._prompt_builder.build(parsed, is_new_session)
 
             # Step 6: Check queue and send queuing notice if needed
             if self._opencode_backend.is_queue_full():

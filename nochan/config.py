@@ -51,6 +51,18 @@ class LoggingConfig:
 
 
 @dataclass
+class PromptConfig:
+    """System prompt file configuration."""
+
+    # Directory for prompt files, relative to opencode work_dir
+    dir: str = "prompts"
+    # Filename for the session-level system prompt (prepended to first message only)
+    session_init_file: str = "session_init.md"
+    # Filename for the per-message prefix prompt (prepended to every message)
+    message_prefix_file: str = "message_prefix.md"
+
+
+@dataclass
 class NochanConfig:
     """Top-level nochan configuration, aggregating all sub-configs."""
 
@@ -58,6 +70,7 @@ class NochanConfig:
     opencode: OpenCodeConfig = field(default_factory=OpenCodeConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    prompt: PromptConfig = field(default_factory=PromptConfig)
 
 
 def load_config(path: str | Path = "config.toml") -> NochanConfig:
@@ -79,12 +92,14 @@ def load_config(path: str | Path = "config.toml") -> NochanConfig:
     opencode = OpenCodeConfig(**raw.get("opencode", {}))
     database = DatabaseConfig(**raw.get("database", {}))
     logging_cfg = LoggingConfig(**raw.get("logging", {}))
+    prompt = PromptConfig(**raw.get("prompt", {}))
 
     return NochanConfig(
         server=server,
         opencode=opencode,
         database=database,
         logging=logging_cfg,
+        prompt=prompt,
     )
 
 

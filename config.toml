@@ -21,6 +21,16 @@ max_concurrent = 1
 # SQLite database file path. Parent directories are created automatically.
 path = "data/nochan.db"
 
+[prompt]
+# Directory for prompt template files, relative to opencode work_dir.
+# e.g. with work_dir = "~/.nochan/workspace", dir = "prompts"
+#      → actual path is ~/.nochan/workspace/prompts/
+dir = "prompts"
+# Filename for the session-level system prompt (prepended to first message only).
+session_init_file = "session_init.md"
+# Filename for the per-message prefix prompt (prepended to every message).
+message_prefix_file = "message_prefix.md"
+
 [logging]
 # Console output level: DEBUG / INFO / WARNING / ERROR.
 # The log file always captures DEBUG regardless of this setting.

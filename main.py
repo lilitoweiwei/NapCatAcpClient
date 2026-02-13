@@ -7,6 +7,7 @@ from pathlib import Path
 from nochan.config import get_config_path, load_config
 from nochan.log import setup_logging
 from nochan.opencode import SubprocessOpenCodeBackend
+from nochan.prompt import PromptBuilder
 from nochan.server import NochanServer
 from nochan.session import SessionManager
 
@@ -46,12 +47,21 @@ async def main() -> None:
         config.opencode.max_concurrent,
     )
 
+    # Initialize prompt builder (prompt dir is relative to opencode work_dir)
+    prompt_dir = work_dir / config.prompt.dir
+    prompt_builder = PromptBuilder(
+        prompt_dir=prompt_dir,
+        session_init_file=config.prompt.session_init_file,
+        message_prefix_file=config.prompt.message_prefix_file,
+    )
+
     # Start WebSocket server
     server = NochanServer(
         host=config.server.host,
         port=config.server.port,
         session_manager=session_manager,
         opencode_backend=opencode_backend,
+        prompt_builder=prompt_builder,
     )
 
     try:

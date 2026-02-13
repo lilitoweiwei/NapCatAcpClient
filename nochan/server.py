@@ -11,6 +11,7 @@ from websockets.asyncio.server import ServerConnection
 from nochan.converter import ai_to_onebot
 from nochan.handler import MessageHandler
 from nochan.opencode import SubprocessOpenCodeBackend
+from nochan.prompt import PromptBuilder
 from nochan.session import SessionManager
 
 logger = logging.getLogger("nochan.server")
@@ -30,6 +31,7 @@ class NochanServer:
         port: int,
         session_manager: SessionManager,
         opencode_backend: SubprocessOpenCodeBackend,
+        prompt_builder: PromptBuilder,
     ) -> None:
         # WebSocket bind address and port
         self._host = host
@@ -48,6 +50,7 @@ class NochanServer:
         self._handler = MessageHandler(
             session_manager=session_manager,
             opencode_backend=opencode_backend,
+            prompt_builder=prompt_builder,
             reply_fn=self._reply_text,
         )
 

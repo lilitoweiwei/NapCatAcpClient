@@ -7,6 +7,7 @@ import pytest_asyncio
 import websockets
 
 from nochan.opencode import OpenCodeResponse, SubprocessOpenCodeBackend
+from nochan.prompt import PromptBuilder
 from nochan.server import NochanServer
 from nochan.session import SessionManager
 from tests.mock_napcat import MockNapCat
@@ -39,11 +40,13 @@ async def full_stack(tmp_path):
     await sm.init()
 
     fake_backend = FakeOpenCodeBackend()
+    prompt_builder = PromptBuilder(tmp_path / "prompts")
     server = NochanServer(
         host="127.0.0.1",
         port=0,
         session_manager=sm,
         opencode_backend=fake_backend,
+        prompt_builder=prompt_builder,
     )
 
     ws_server = await websockets.serve(server._handler_ws, "127.0.0.1", 0)

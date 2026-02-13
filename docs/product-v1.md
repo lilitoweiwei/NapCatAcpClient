@@ -280,21 +280,34 @@ v1 不支持切换到历史会话，只能和最新的激活会话交互。
 
 **附加上下文**：在发送给 OpenCode 的 prompt 前面，注入当前消息的来源信息。群名称直接从消息事件的 `group_name` 字段获取，无需额外 API 调用。
 
-私聊示例：
+**System Prompt 机制**：用户可在配置的 prompt 目录下放置两个模板文件（文件名可在 `config.toml` 中自定义）：
+
+- `session_init.md` — 新会话的第一条消息前附加，用于设定 AI 角色/行为
+- `message_prefix.md` — 每条消息前都附加，用于持续性提醒/约束
+
+prompt 文件在每次构造消息时实时读取（热更新），无需重启服务。空文件不影响输出。
+
+新会话首条消息的完整 prompt 结构：
 
 ```
+<session_init.md 内容>
+
+<message_prefix.md 内容>
+
 [私聊，用户 张三(123456)]
 你好，帮我写个排序函数
 ```
 
-群聊示例：
+后续消息的 prompt 结构：
 
 ```
+<message_prefix.md 内容>
+
 [群聊 开发讨论组(789012)，用户 张三(123456)]
 你好，帮我写个排序函数
 ```
 
-这样 AI 能感知到是谁在和它说话、在哪个群聊中。
+这样 AI 能感知到是谁在和它说话、在哪个群聊中，同时遵循用户设定的行为约束。
 
 ### 5.2 AI → QQ（出站转换）
 
@@ -474,6 +487,11 @@ max_concurrent = 1               # 最大并发 opencode 进程数
 [database]
 path = "data/nochan.db"          # SQLite 数据库路径
 
+[prompt]
+dir = "prompts"                  # prompt 模板目录（相对于 opencode work_dir）
+session_init_file = "session_init.md"   # 会话初始化 prompt 文件名
+message_prefix_file = "message_prefix.md" # 每条消息前缀 prompt 文件名
+
 [logging]
 level = "INFO"                   # 控制台日志级别（文件始终记录 DEBUG）
 dir = "data/logs"                # 日志文件目录
@@ -517,7 +535,7 @@ nochan/
     ├── session.py            # 会话管理（Session Manager）
     ├── converter.py          # 消息格式转换（OneBot <-> 内部格式）
     ├── command.py            # 用户指令解析（/new, /help 等）
-    ├── prompt.py             # AI prompt 构造（附加上下文信息）
+    ├── prompt.py             # AI prompt 构造（PromptBuilder，含 system prompt 文件读取）
     └── opencode.py           # OpenCode 封装（OpenCode Backend）
 ```
 

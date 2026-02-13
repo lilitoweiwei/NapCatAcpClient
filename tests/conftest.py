@@ -22,6 +22,10 @@ def tmp_config(tmp_path: Path) -> Path:
         "max_concurrent = 1\n\n"
         "[database]\n"
         'path = "' + str(tmp_path / "test.db").replace("\\", "/") + '"\n\n'
+        "[prompt]\n"
+        'dir = "prompts"\n'
+        'session_init_file = "session_init.md"\n'
+        'message_prefix_file = "message_prefix.md"\n\n'
         "[logging]\n"
         'level = "DEBUG"\n'
         'dir = "' + str(tmp_path / "logs").replace("\\", "/") + '"\n'

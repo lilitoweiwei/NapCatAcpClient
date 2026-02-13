@@ -5,6 +5,7 @@ import pytest_asyncio
 
 from nochan.handler import MessageHandler
 from nochan.opencode import OpenCodeResponse, SubprocessOpenCodeBackend
+from nochan.prompt import PromptBuilder
 from nochan.session import SessionManager
 from tests.mock_napcat import MockNapCat
 
@@ -47,15 +48,17 @@ class ReplyCollector:
 
 @pytest_asyncio.fixture
 async def handler_env(tmp_path):
-    """Create a MessageHandler with fake backend and reply collector."""
+    """Create a MessageHandler with fake backend, prompt builder, and reply collector."""
     sm = SessionManager(str(tmp_path / "handler_test.db"))
     await sm.init()
 
     backend = FakeBackend()
+    prompt_builder = PromptBuilder(tmp_path / "prompts")
     replies = ReplyCollector()
     handler = MessageHandler(
         session_manager=sm,
         opencode_backend=backend,
+        prompt_builder=prompt_builder,
         reply_fn=replies,
     )
 

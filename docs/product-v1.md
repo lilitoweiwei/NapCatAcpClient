@@ -568,10 +568,11 @@ nochan/
     ├── config.py             # 配置加载
     ├── log.py                # 日志初始化
     ├── server.py             # WebSocket 传输层（连接管理、事件分发、API 调用）
-    ├── handler.py            # 消息处理流水线（业务逻辑，不依赖 WebSocket）
+    ├── handler.py            # 消息路由（薄调度层：解析 → 过滤 → 分发到指令/AI 处理）
+    ├── ai_processor.py       # AI 请求生命周期（超时通知、取消支持、会话/prompt/OpenCode 调用）
     ├── session.py            # 会话管理（Session Manager）
     ├── converter.py          # 消息格式转换（OneBot <-> 内部格式）
-    ├── command.py            # 用户指令解析（/new, /help 等）
+    ├── command.py            # 用户指令解析与执行（parse_command + CommandExecutor）
     ├── prompt.py             # AI prompt 构造（PromptBuilder，含 system prompt 文件读取）
     └── opencode.py           # OpenCode 封装（OpenCode Backend）
 ```

@@ -47,7 +47,7 @@ async def full_stack(tmp_path):
         opencode_backend=fake_backend,
     )
 
-    ws_server = await websockets.serve(server._handler, "127.0.0.1", 0)
+    ws_server = await websockets.serve(server._handler_ws, "127.0.0.1", 0)
     port = ws_server.sockets[0].getsockname()[1]
 
     mock = MockNapCat(f"ws://127.0.0.1:{port}")

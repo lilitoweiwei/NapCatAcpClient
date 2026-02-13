@@ -1,4 +1,4 @@
-"""WebSocket server for receiving OneBot 11 events from NapCatQQ."""
+"""WebSocket transport layer for communicating with NapCatQQ via OneBot 11."""
 
 import asyncio
 import json
@@ -8,13 +8,8 @@ import uuid
 import websockets
 from websockets.server import ServerConnection
 
-from nochan.converter import (
-    HELP_TEXT,
-    build_prompt,
-    parse_command,
-    parse_message_event,
-    to_onebot_message,
-)
+from nochan.converter import to_onebot_message
+from nochan.handler import MessageHandler
 from nochan.opencode import SubprocessOpenCodeBackend
 from nochan.session import SessionManager
 
@@ -22,7 +17,12 @@ logger = logging.getLogger("nochan.server")
 
 
 class NochanServer:
-    """WebSocket server that bridges NapCatQQ and OpenCode."""
+    """
+    WebSocket server that handles the NapCatQQ transport layer.
+
+    Responsibilities: connection lifecycle, event dispatching, API call/response
+    matching, and sending messages. Business logic is delegated to MessageHandler.
+    """
 
     def __init__(
         self,
@@ -34,10 +34,6 @@ class NochanServer:
         # WebSocket bind address and port
         self._host = host
         self._port = port
-        # Session manager for chat-to-opencode session mapping
-        self._session_manager = session_manager
-        # OpenCode backend for sending prompts and receiving AI responses
-        self._opencode_backend = opencode_backend
 
         # Currently active WebSocket connection from NapCatQQ (only one expected)
         self._connection: ServerConnection | None = None
@@ -46,6 +42,13 @@ class NochanServer:
         # In-flight API calls awaiting response, keyed by echo ID
         self._pending: dict[str, asyncio.Future[dict]] = {}
 
+        # Message handler — business logic, decoupled from transport
+        self._handler = MessageHandler(
+            session_manager=session_manager,
+            opencode_backend=opencode_backend,
+            reply_fn=self._reply_text,
+        )
+
     async def start(self) -> None:
         """Start the WebSocket server and run forever."""
         logger.info(
@@ -53,11 +56,13 @@ class NochanServer:
         )
         # Use None for host to bind all interfaces (IPv4 + IPv6)
         host = None if self._host == "0.0.0.0" else self._host
-        async with websockets.serve(self._handler, host, self._port):
+        async with websockets.serve(self._handler_ws, host, self._port):
             logger.info("Server ready, waiting for NapCatQQ connection...")
             await asyncio.Future()  # run forever
 
-    async def _handler(self, websocket: ServerConnection) -> None:
+    # --- WebSocket connection handling ---
+
+    async def _handler_ws(self, websocket: ServerConnection) -> None:
         """Handle a WebSocket connection from NapCatQQ."""
         remote = websocket.remote_address
         logger.info("NapCatQQ connected from %s", remote)
@@ -114,8 +119,13 @@ class NochanServer:
                 "Raw message event: type=%s user=%s raw=%s",
                 msg_type, user_id, raw_msg,
             )
-            # Handle message events in a separate task to not block the event loop
-            asyncio.create_task(self._handle_message(event))
+            # Delegate to message handler in a separate task
+            if self._bot_id is not None:
+                asyncio.create_task(
+                    self._handler.handle_message(event, self._bot_id)
+                )
+            else:
+                logger.warning("Received message before bot_id was set, ignoring")
 
         elif post_type == "notice":
             logger.debug(
@@ -134,95 +144,7 @@ class NochanServer:
         else:
             logger.debug("Unknown post_type: %s keys=%s", post_type, list(event.keys()))
 
-    async def _handle_message(self, event: dict) -> None:
-        """Process an incoming message event through the full pipeline."""
-        try:
-            if self._bot_id is None:
-                logger.warning("Received message before bot_id was set, ignoring")
-                return
-
-            # Step 1: Parse the message event
-            parsed = parse_message_event(event, self._bot_id)
-
-            # Step 2: Group messages require @bot
-            if parsed.message_type == "group" and not parsed.is_at_bot:
-                logger.debug(
-                    "Ignored group message (no @bot): group=%s user=%s text=%s",
-                    parsed.chat_id, parsed.sender_name, parsed.text[:100],
-                )
-                return
-
-            logger.info(
-                "Processing message from %s (%s): %s",
-                parsed.sender_name, parsed.chat_id, parsed.text[:100],
-            )
-
-            # Step 3: Check for commands
-            command = parse_command(parsed.text)
-            if command is not None:
-                logger.info("Command received: /%s from %s", command, parsed.chat_id)
-                await self._handle_command(command, parsed, event)
-                return
-
-            # Step 4: Get or create session
-            session = await self._session_manager.get_active_session(parsed.chat_id)
-            if session is None:
-                session = await self._session_manager.create_session(parsed.chat_id)
-
-            # Step 5: Build prompt with context
-            prompt = build_prompt(parsed)
-
-            # Step 6: Check queue and send queuing notice if needed
-            if self._opencode_backend.is_queue_full():
-                await self._reply_text(event, "AI 正在忙，你的请求已排队，请稍候...")
-
-            # Step 7: Call OpenCode
-            response = await self._opencode_backend.send_message(
-                session.opencode_session_id, prompt
-            )
-
-            # Step 8: Update session with OpenCode session ID if new
-            if session.opencode_session_id is None and response.session_id:
-                await self._session_manager.update_opencode_session_id(
-                    session.id, response.session_id
-                )
-
-            # Step 9-10: Convert and send reply
-            if response.success and response.content:
-                logger.info(
-                    "Sending AI reply to %s (%d chars)",
-                    parsed.chat_id, len(response.content),
-                )
-                await self._reply_text(event, response.content)
-            elif response.success and not response.content:
-                logger.warning("OpenCode returned empty content for %s", parsed.chat_id)
-                await self._reply_text(event, "AI 未返回有效回复")
-            else:
-                logger.error(
-                    "OpenCode failed for %s: %s", parsed.chat_id, response.error,
-                )
-                await self._reply_text(event, "AI 处理出错，请稍后重试")
-
-        except Exception as e:
-            logger.error("Error handling message: %s", e, exc_info=True)
-            try:
-                await self._reply_text(event, "处理消息时发生内部错误")
-            except Exception:
-                pass
-
-    async def _handle_command(
-        self, command: str, parsed: "ParsedMessage", event: dict
-    ) -> None:
-        """Handle a user command (/new, /help, etc.)."""
-        if command == "new":
-            # Archive current session and create a new one
-            await self._session_manager.archive_active_session(parsed.chat_id)
-            await self._session_manager.create_session(parsed.chat_id)
-            await self._reply_text(event, "已创建新会话，AI 上下文已清空。")
-            logger.info("New session created for %s", parsed.chat_id)
-
-        elif command == "help" or command == "unknown":
-            await self._reply_text(event, HELP_TEXT)
+    # --- Outbound messaging ---
 
     async def _reply_text(self, event: dict, text: str) -> None:
         """Send a text reply back to the source of the message event."""

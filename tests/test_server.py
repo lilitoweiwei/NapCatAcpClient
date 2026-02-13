@@ -51,7 +51,7 @@ async def server_and_mock(tmp_path):
     # Start server in background; we need to find the actual port
     # Use websockets.serve directly to get the server object
     ws_server = await websockets.serve(
-        server._handler, "127.0.0.1", 0
+        server._handler_ws, "127.0.0.1", 0
     )
     # Extract the port from the server socket
     port = ws_server.sockets[0].getsockname()[1]

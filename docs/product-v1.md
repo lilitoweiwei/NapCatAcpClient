@@ -496,7 +496,13 @@ nochan/
 ├── tests/
 │   ├── conftest.py          # pytest 公共 fixtures
 │   ├── mock_napcat.py       # 模拟 NapCatQQ 客户端
-│   ├── test_*.py            # 自动化测试
+│   ├── test_config.py       # 配置加载测试
+│   ├── test_converter.py    # 消息转换测试
+│   ├── test_handler.py      # 消息处理流水线测试（纯业务逻辑，无 WebSocket）
+│   ├── test_session.py      # 会话管理测试
+│   ├── test_opencode.py     # OpenCode 封装测试
+│   ├── test_server.py       # WebSocket 传输层测试
+│   ├── test_integration.py  # 端到端集成测试
 │   └── manual/              # 手动验证脚本（需真实外部服务）
 │       ├── verify_napcat.py
 │       └── verify_opencode.py
@@ -504,7 +510,8 @@ nochan/
     ├── __init__.py
     ├── config.py             # 配置加载
     ├── log.py                # 日志初始化
-    ├── server.py             # WebSocket 服务器，接收/发送 OneBot 事件
+    ├── server.py             # WebSocket 传输层（连接管理、事件分发、API 调用）
+    ├── handler.py            # 消息处理流水线（业务逻辑，不依赖 WebSocket）
     ├── session.py            # 会话管理（Session Manager）
     ├── converter.py          # 消息转换（Message Converter）
     └── opencode.py           # OpenCode 封装（OpenCode Backend）

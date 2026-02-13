@@ -26,6 +26,9 @@ def tmp_config(tmp_path: Path) -> Path:
         'dir = "prompts"\n'
         'session_init_file = "session_init.md"\n'
         'message_prefix_file = "message_prefix.md"\n\n'
+        "[ux]\n"
+        "thinking_notify_seconds = 10\n"
+        "thinking_long_notify_seconds = 30\n\n"
         "[logging]\n"
         'level = "DEBUG"\n'
         'dir = "' + str(tmp_path / "logs").replace("\\", "/") + '"\n'

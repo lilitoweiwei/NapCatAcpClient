@@ -62,6 +62,8 @@ async def main() -> None:
         session_manager=session_manager,
         opencode_backend=opencode_backend,
         prompt_builder=prompt_builder,
+        thinking_notify_seconds=config.ux.thinking_notify_seconds,
+        thinking_long_notify_seconds=config.ux.thinking_long_notify_seconds,
     )
 
     try:

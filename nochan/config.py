@@ -63,6 +63,16 @@ class PromptConfig:
 
 
 @dataclass
+class UxConfig:
+    """User experience configuration for timeout notifications and interaction."""
+
+    # Seconds before sending first "AI is thinking" notification (0 to disable)
+    thinking_notify_seconds: float = 10
+    # Seconds before sending "AI thinking too long, use /stop" notification (0 to disable)
+    thinking_long_notify_seconds: float = 30
+
+
+@dataclass
 class NochanConfig:
     """Top-level nochan configuration, aggregating all sub-configs."""
 
@@ -71,6 +81,7 @@ class NochanConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     prompt: PromptConfig = field(default_factory=PromptConfig)
+    ux: UxConfig = field(default_factory=UxConfig)
 
 
 def load_config(path: str | Path = "config.toml") -> NochanConfig:
@@ -93,6 +104,7 @@ def load_config(path: str | Path = "config.toml") -> NochanConfig:
     database = DatabaseConfig(**raw.get("database", {}))
     logging_cfg = LoggingConfig(**raw.get("logging", {}))
     prompt = PromptConfig(**raw.get("prompt", {}))
+    ux = UxConfig(**raw.get("ux", {}))
 
     return NochanConfig(
         server=server,
@@ -100,6 +112,7 @@ def load_config(path: str | Path = "config.toml") -> NochanConfig:
         database=database,
         logging=logging_cfg,
         prompt=prompt,
+        ux=ux,
     )
 
 

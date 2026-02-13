@@ -32,6 +32,8 @@ class NochanServer:
         session_manager: SessionManager,
         opencode_backend: SubprocessOpenCodeBackend,
         prompt_builder: PromptBuilder,
+        thinking_notify_seconds: float = 10,
+        thinking_long_notify_seconds: float = 30,
     ) -> None:
         # WebSocket bind address and port
         self._host = host
@@ -52,6 +54,8 @@ class NochanServer:
             opencode_backend=opencode_backend,
             prompt_builder=prompt_builder,
             reply_fn=self._reply_text,
+            thinking_notify_seconds=thinking_notify_seconds,
+            thinking_long_notify_seconds=thinking_long_notify_seconds,
         )
 
     async def start(self) -> None:

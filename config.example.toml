@@ -30,6 +30,12 @@ session_init_file = "session_init.md"
 # Filename for the per-message prefix prompt (prepended to every message).
 message_prefix_file = "message_prefix.md"
 
+[ux]
+# Seconds before sending "AI is thinking" notification (0 to disable).
+thinking_notify_seconds = 10
+# Seconds before sending "AI is thinking too long, use /stop" notification (0 to disable).
+thinking_long_notify_seconds = 30
+
 [logging]
 # Console output level: DEBUG / INFO / WARNING / ERROR.
 # The log file always captures DEBUG regardless of this setting.

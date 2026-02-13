@@ -27,9 +27,13 @@ class FakeOpenCodeBackend(SubprocessOpenCodeBackend):
             success=True,
             error=None,
         )
+        # Configurable delay before returning response (for timeout/cancel tests)
+        self.delay: float = 0
 
     async def _run(self, session_id: str | None, message: str) -> OpenCodeResponse:
         self.last_message = message
+        if self.delay > 0:
+            await asyncio.sleep(self.delay)
         return self.response
 
 
@@ -209,3 +213,36 @@ async def test_heartbeat_no_crash(server_and_mock) -> None:
     await mock.send_heartbeat()
     await asyncio.sleep(0.2)
     # No crash = pass
+
+
+async def test_command_stop_no_active(server_and_mock) -> None:
+    """Test that /stop when no AI is running returns appropriate message."""
+    server, mock, _ = server_and_mock
+    await asyncio.sleep(0.1)
+
+    await mock.send_private_message(111, "Alice", "/stop")
+
+    api_call = await mock.recv_api_call(timeout=3.0)
+    assert api_call is not None
+    msg_text = api_call["params"]["message"][0]["data"]["text"]
+    assert "没有进行中" in msg_text
+
+
+async def test_command_stop_cancels_ai(server_and_mock) -> None:
+    """Test that /stop cancels an active AI processing task via WebSocket."""
+    server, mock, fake_backend = server_and_mock
+    await asyncio.sleep(0.1)
+    fake_backend.delay = 5.0  # Long delay to keep AI "thinking"
+
+    # Send a message that will take long to process
+    await mock.send_private_message(111, "Alice", "think hard")
+    await asyncio.sleep(0.2)  # Let the handler register the active task
+
+    # Send /stop
+    await mock.send_private_message(111, "Alice", "/stop")
+
+    # Should receive the "已中断" message
+    api_call = await mock.recv_api_call(timeout=3.0)
+    assert api_call is not None
+    msg_text = api_call["params"]["message"][0]["data"]["text"]
+    assert "已中断" in msg_text

@@ -27,9 +27,13 @@ class FakeOpenCodeBackend(SubprocessOpenCodeBackend):
             success=True,
             error=None,
         )
+        # Configurable delay before returning response (for timeout/cancel tests)
+        self.delay: float = 0
 
     async def _run(self, session_id: str | None, message: str) -> OpenCodeResponse:
         self.calls.append((session_id, message))
+        if self.delay > 0:
+            await asyncio.sleep(self.delay)
         return self.response
 
 
@@ -207,3 +211,59 @@ async def test_opencode_failure(full_stack) -> None:
     assert api_call is not None
     msg_text = api_call["params"]["message"][0]["data"]["text"]
     assert "出错" in msg_text
+
+
+async def test_stop_command_cancels_ai(full_stack) -> None:
+    """Integration test: /stop command cancels an active AI task."""
+    server, mock, fake_backend, sm = full_stack
+    fake_backend.delay = 5.0  # Long delay to keep AI "thinking"
+
+    # Send a message that will take long
+    await mock.send_private_message(111, "Alice", "think hard")
+    await asyncio.sleep(0.2)  # Let the handler register the active task
+
+    # Send /stop
+    await mock.send_private_message(111, "Alice", "/stop")
+
+    # Should receive the "已中断" message
+    api_call = await mock.recv_api_call(timeout=3.0)
+    assert api_call is not None
+    msg_text = api_call["params"]["message"][0]["data"]["text"]
+    assert "已中断" in msg_text
+
+
+async def test_busy_rejection_integration(full_stack) -> None:
+    """Integration test: concurrent messages for the same chat are rejected."""
+    server, mock, fake_backend, sm = full_stack
+    fake_backend.delay = 5.0
+
+    # Send first message (will be long-running)
+    await mock.send_private_message(111, "Alice", "first")
+    await asyncio.sleep(0.2)
+
+    # Send second message — should be rejected
+    await mock.send_private_message(111, "Alice", "second")
+
+    # Should receive the "busy" rejection message
+    api_call = await mock.recv_api_call(timeout=3.0)
+    assert api_call is not None
+    msg_text = api_call["params"]["message"][0]["data"]["text"]
+    assert "正在思考" in msg_text
+    assert "/stop" in msg_text
+
+    # Clean up: cancel the first task by sending /stop
+    await mock.send_private_message(111, "Alice", "/stop")
+    stop_call = await mock.recv_api_call(timeout=3.0)
+    assert stop_call is not None
+    assert "已中断" in stop_call["params"]["message"][0]["data"]["text"]
+
+
+async def test_help_includes_stop(full_stack) -> None:
+    """Integration test: /help includes /stop command."""
+    server, mock, fake_backend, sm = full_stack
+
+    await mock.send_private_message(111, "Alice", "/help")
+    api_call = await mock.recv_api_call(timeout=3.0)
+    assert api_call is not None
+    msg_text = api_call["params"]["message"][0]["data"]["text"]
+    assert "/stop" in msg_text

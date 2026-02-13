@@ -1,6 +1,7 @@
 """OpenCode CLI backend wrapper with subprocess execution and concurrency control."""
 
 import asyncio
+import contextlib
 import json
 import logging
 from dataclasses import dataclass
@@ -183,6 +184,7 @@ class SubprocessOpenCodeBackend:
             message[:100],
         )
 
+        process: asyncio.subprocess.Process | None = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -218,6 +220,18 @@ class SubprocessOpenCodeBackend:
             lines = stdout_text.splitlines()
             logger.debug("OpenCode stdout: %d lines, %d bytes", len(lines), len(stdout_text))
             return parse_jsonl_events(lines)
+
+        except asyncio.CancelledError:
+            # Kill the subprocess when the calling task is cancelled (/stop)
+            if process is not None and process.returncode is None:
+                logger.info(
+                    "Killing opencode subprocess (pid=%s) due to cancellation",
+                    process.pid,
+                )
+                process.kill()
+                with contextlib.suppress(ProcessLookupError):
+                    await process.wait()
+            raise
 
         except FileNotFoundError:
             logger.error("OpenCode command not found: %s", self._command)

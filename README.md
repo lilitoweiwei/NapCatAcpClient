@@ -11,6 +11,14 @@ QQ User → NapCat (reverse WS) → ncat → ACP Agent (stdin/stdout)
 QQ User ← NapCat (reverse WS) ← ncat ← ACP Agent (stdin/stdout)
 ```
 
+Supported content:
+
+- **Text**: forwarded as ACP text blocks
+- **Images**:
+  - **NapCat → agent**: OneBot image segments are downloaded and forwarded as ACP image blocks when the agent advertises `promptCapabilities.image`
+  - **agent → NapCat**: ACP image outputs are forwarded back to QQ as OneBot image segments (`base64://...`)
+  - **Fallback**: if the agent does not support images, or the image download fails, ncat forwards `[图片]` / `[图片 url=...]` as plain text
+
 ## Prerequisites
 
 - NapCatQQ configured in **reverse WebSocket** (OneBot v11) mode
@@ -54,6 +62,7 @@ Copy `config.example.toml` to `config.toml` and customize. Key settings:
 - `agent.command` / `agent.args` / `agent.cwd` — ACP agent subprocess command line + working directory
 - `ux.thinking_notify_seconds` / `ux.thinking_long_notify_seconds` — "AI is thinking" notifications
 - `ux.permission_timeout` / `ux.permission_raw_input_max_len` — permission prompt behavior
+- `ux.image_download_timeout` — timeout (seconds) for downloading images from NapCat-provided URLs
 - `logging.level` — Console log level (log file always captures DEBUG)
 - `logging.dir` / `logging.keep_days` / `logging.max_total_mb` — log retention and disk cap
 

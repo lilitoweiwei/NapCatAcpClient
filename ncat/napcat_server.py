@@ -12,7 +12,7 @@ import websockets
 from websockets.asyncio.server import ServerConnection
 
 from ncat.agent_manager import AgentManager
-from ncat.converter import ai_to_onebot
+from ncat.converter import ContentPart, ai_to_onebot, content_to_onebot
 from ncat.dispatcher import MessageDispatcher
 from ncat.permission import PermissionBroker
 
@@ -36,6 +36,7 @@ class NcatNapCatServer:
         thinking_long_notify_seconds: float = 30,
         permission_timeout: float = 300,
         permission_raw_input_max_len: int = 500,
+        image_download_timeout: float = 15.0,
     ) -> None:
         # WebSocket bind address and port
         self._host = host
@@ -65,9 +66,11 @@ class NcatNapCatServer:
         self._dispatcher = MessageDispatcher(
             agent_manager=agent_manager,
             reply_fn=self._reply_text,
+            reply_content_fn=self._reply_content,
             permission_broker=permission_broker,
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
+            image_download_timeout=image_download_timeout,
         )
 
     async def start(self) -> None:
@@ -177,6 +180,40 @@ class NcatNapCatServer:
 
         # Log the reply text at DEBUG (may be long)
         logger.debug("Reply text (%d chars): %s", len(text), text[:300])
+
+        if message_type == "private":
+            resp = await self.send_api(
+                "send_private_msg",
+                {
+                    "user_id": event["user_id"],
+                    "message": segments,
+                },
+            )
+            if resp and resp.get("retcode") != 0:
+                logger.warning("send_private_msg failed: %s", resp)
+        elif message_type == "group":
+            resp = await self.send_api(
+                "send_group_msg",
+                {
+                    "group_id": event["group_id"],
+                    "message": segments,
+                },
+            )
+            if resp and resp.get("retcode") != 0:
+                logger.warning("send_group_msg failed: %s", resp)
+
+    async def _reply_content(self, event: dict, parts: list[ContentPart]) -> None:
+        """Send a mixed (text+image) reply back to the source of the message event."""
+        message_type = event.get("message_type", "")
+        segments = content_to_onebot(parts)
+
+        text_preview = "".join(p.text for p in parts if p.type == "text")[:300]
+        logger.debug(
+            "Reply content: parts=%d segments=%d text_preview=%s",
+            len(parts),
+            len(segments),
+            text_preview,
+        )
 
         if message_type == "private":
             resp = await self.send_api(

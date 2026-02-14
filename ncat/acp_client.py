@@ -19,6 +19,7 @@ from acp.schema import (
     CreateTerminalResponse,
     CurrentModeUpdate,
     EnvVariable,
+    ImageContentBlock,
     KillTerminalCommandResponse,
     PermissionOption,
     ReadTextFileResponse,
@@ -35,6 +36,8 @@ from acp.schema import (
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
 )
+
+from ncat.converter import ContentPart
 
 if TYPE_CHECKING:
     from ncat.agent_manager import AgentManager
@@ -79,9 +82,21 @@ class NcatAcpClient(Client):
         are logged but not processed (e.g. tool calls, plans).
         """
         if isinstance(update, AgentMessageChunk):
-            # Extract text content and accumulate it
+            # Extract content and accumulate it in order.
             if isinstance(update.content, TextContentBlock):
-                self._agent_manager.accumulate_text(session_id, update.content.text)
+                self._agent_manager.accumulate_part(
+                    session_id,
+                    ContentPart(type="text", text=update.content.text),
+                )
+            elif isinstance(update.content, ImageContentBlock):
+                self._agent_manager.accumulate_part(
+                    session_id,
+                    ContentPart(
+                        type="image",
+                        image_base64=update.content.data,
+                        image_mime=update.content.mime_type,
+                    ),
+                )
         elif isinstance(update, (ToolCallStart, ToolCallProgress)):
             logger.debug("Tool call update for session %s: %s", session_id, type(update).__name__)
         elif isinstance(update, AgentPlanUpdate):

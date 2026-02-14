@@ -8,6 +8,7 @@ spawning a real ACP agent subprocess.
 import asyncio
 from typing import Any
 
+from ncat.converter import ContentPart
 from ncat.permission import PermissionBroker
 
 
@@ -20,8 +21,12 @@ class MockAgentManager:
     def __init__(self) -> None:
         # Recorded prompt calls: list of (chat_id, text)
         self.calls: list[tuple[str, str]] = []
+        # Recorded prompt blocks (ACP ContentBlocks) for assertions in image tests
+        self.calls_blocks: list[tuple[str, list[Any]]] = []
         # Text to return from send_prompt
         self.response_text: str = "Mock AI response"
+        # Optional richer response for image tests
+        self.response_parts: list[ContentPart] | None = None
         # Delay in seconds before returning response (for timeout/cancel tests)
         self.delay: float = 0
         # Chat IDs that have been cancelled
@@ -36,10 +41,16 @@ class MockAgentManager:
         self._permission_broker: PermissionBroker | None = None
         # Last event per chat (for permission reply routing)
         self._last_events: dict[str, dict[str, Any]] = {}
+        # Agent capability flag (mirrors real AgentManager.supports_image)
+        self._supports_image: bool = False
 
     @property
     def is_running(self) -> bool:
         return True
+
+    @property
+    def supports_image(self) -> bool:
+        return self._supports_image
 
     @property
     def permission_broker(self) -> PermissionBroker | None:
@@ -85,14 +96,24 @@ class MockAgentManager:
         # Busy tracking is done by PromptRunner, not AgentManager
         return False
 
-    async def send_prompt(self, chat_id: str, text: str) -> str:
+    async def send_prompt(self, chat_id: str, prompt: Any) -> list[ContentPart]:
         """Simulate sending a prompt. Records call, waits for delay, returns response."""
+        text = prompt if isinstance(prompt, str) else ""
+        if isinstance(prompt, list):
+            self.calls_blocks.append((chat_id, prompt))
+            if prompt:
+                # The first block is expected to be a TextContentBlock.
+                first = prompt[0]
+                text = str(getattr(first, "text", first))
+
         self.calls.append((chat_id, text))
         if self.should_crash:
             raise RuntimeError("Agent crashed")
         if self.delay > 0:
             await asyncio.sleep(self.delay)
-        return self.response_text
+        if self.response_parts is not None:
+            return self.response_parts
+        return [ContentPart(type="text", text=self.response_text)]
 
     async def cancel(self, chat_id: str) -> bool:
         self.cancelled.add(chat_id)

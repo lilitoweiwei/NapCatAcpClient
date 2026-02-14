@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 
 from ncat.agent_manager import AgentManager
 from ncat.command import HELP_TEXT, CommandExecutor
-from ncat.converter import onebot_to_internal
+from ncat.converter import ContentPart, onebot_to_internal
 from ncat.permission import PermissionBroker
 from ncat.prompt_runner import PromptRunner
 
@@ -21,6 +21,9 @@ logger = logging.getLogger("ncat.dispatcher")
 # Type alias for the reply callback provided by the transport layer.
 # Signature: async reply_fn(event: dict, text: str) -> None
 ReplyFn = Callable[[dict, str], Awaitable[None]]
+# Type alias for mixed content replies (text + images).
+# Signature: async reply_content_fn(event: dict, parts: list[ContentPart]) -> None
+ReplyContentFn = Callable[[dict, list[ContentPart]], Awaitable[None]]
 
 # Busy rejection message (dispatching-level concern)
 _MSG_BUSY = "AI 正在思考中，请等待或使用 /stop 中断。"
@@ -42,8 +45,10 @@ class MessageDispatcher:
         agent_manager: AgentManager,
         reply_fn: ReplyFn,
         permission_broker: PermissionBroker,
+        reply_content_fn: ReplyContentFn | None = None,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
+        image_download_timeout: float = 15.0,
     ) -> None:
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
@@ -52,13 +57,20 @@ class MessageDispatcher:
         # Permission broker for forwarding permission requests to QQ users
         self._permission_broker = permission_broker
 
+        async def _reply_content_fallback(event: dict, parts: list[ContentPart]) -> None:
+            # Fallback: deliver text-only if the transport doesn't support images.
+            text = "".join(p.text for p in parts if p.type == "text")
+            await reply_fn(event, text or "AI 未返回有效回复")
+
         # Prompt lifecycle manager (owns active task tracking)
         self._ai = PromptRunner(
             agent_manager=agent_manager,
             reply_fn=reply_fn,
+            reply_content_fn=reply_content_fn or _reply_content_fallback,
             permission_broker=permission_broker,
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
+            image_download_timeout=image_download_timeout,
         )
 
         # Command executor (cancel_fn bridges to PromptRunner without direct import)

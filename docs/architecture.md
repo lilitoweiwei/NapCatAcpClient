@@ -37,6 +37,7 @@ ncat/
 ├── permission.py            Permission broker (forward ACP requests to QQ users)
 ├── command.py               Command executor (/new, /stop, /help)
 ├── converter.py             Message format conversion (OneBot ↔ internal)
+├── image_utils.py           Image download + base64 helpers (httpx)
 ├── acp_client.py            ACP protocol callbacks (NcatAcpClient)
 ├── agent_manager.py         ACP agent subprocess manager (AgentManager)
 └── __init__.py
@@ -61,7 +62,8 @@ MessageDispatcher.handle_message()
   │ Checks busy state (rejects if AI already processing)
   ▼
 PromptRunner.process()
-  │ Builds context header (sender info + chat context)
+  │ Builds ACP prompt blocks (text + optional images)
+  │ Downloads NapCat image URLs when agent supports images
   │ Starts timeout notification timers
   ▼
 AgentManager.send_prompt()
@@ -71,7 +73,7 @@ AgentManager.send_prompt()
   │                                          ┌──────────────────────────┐
   │   (during await, agent streams chunks)   │ NcatAcpClient            │
   │ ◄─────────────────────────────────────── │   .session_update()      │
-  │                                          │   accumulates text       │
+  │                                          │   accumulates ContentPart│
   │                                          └──────────────────────────┘
   │                                          ┌──────────────────────────┐
   │   (agent requests tool permission)       │ NcatAcpClient            │
@@ -80,14 +82,14 @@ AgentManager.send_prompt()
   │                                          │     → sends QQ message   │
   │                                          │     → awaits user reply  │
   │                                          └──────────────────────────┘
-  │ Returns accumulated response text
+  │ Returns accumulated response parts (list[ContentPart])
   ▼
 PromptRunner.process()
   │ Cancels timeout timers
-  │ Calls reply_fn(event, response_text)
+  │ Calls reply_content_fn(event, response_parts)
   ▼
-NcatNapCatServer._reply_text()
-  │ Converts text → OneBot segments
+NcatNapCatServer._reply_content()
+  │ Converts ContentParts → OneBot segments (text + images)
   │ Sends via WebSocket API call
   ▼
 NapCatQQ → QQ User
@@ -123,7 +125,8 @@ Thin message dispatcher. Pipeline:
 
 Manages the full lifecycle of a single AI prompt request:
 
-- Context header construction (`converter.build_context_header`)
+- Prompt block construction (`converter.build_prompt_blocks`)
+- Image download from NapCat-provided URLs (when agent supports images)
 - Active task tracking per chat_id
 - Timeout notifications ("AI is thinking...", "/stop hint")
 - Delegating to `AgentManager.send_prompt()`
@@ -158,7 +161,7 @@ Bridges ACP permission requests with QQ user interaction:
 ### `acp_client.py` — NcatAcpClient
 
 **NcatAcpClient** (ACP protocol callbacks):
-- `session_update`: Accumulates `AgentMessageChunk` text into `AgentManager`
+- `session_update`: Accumulates `AgentMessageChunk` content into `AgentManager` as ordered `ContentPart` items (text + images)
 - `request_permission`: Delegates to `PermissionBroker` for interactive
   user approval (reverse-looks up `chat_id` from `session_id`)
 - File system / terminal methods: All rejected (`method_not_found`)
@@ -168,19 +171,22 @@ Bridges ACP permission requests with QQ user interaction:
 **AgentManager** (agent subprocess + session lifecycle):
 - Spawns agent subprocess, establishes ACP connection over stdio
 - Initializes ACP protocol handshake
+- Tracks agent prompt capabilities (e.g. whether images are supported in prompts)
 - Maps `chat_id` (QQ chat identifier) → ACP `session_id` (bidirectional)
 - Stores last event per chat for permission reply routing
-- Sends prompts and collects accumulated responses
+- Sends prompt content blocks and collects accumulated responses as `list[ContentPart]`
 - Handles cancellation via ACP `session/cancel`
 - Manages agent process start/stop
 
 ### `converter.py`
 
-Pure conversion functions, no state:
+Conversion and prompt-building helpers (stateless):
 
 - `onebot_to_internal()`: OneBot v11 event dict → `ParsedMessage` dataclass
 - `build_context_header()`: `ParsedMessage` → context-enriched prompt string
-- `ai_to_onebot()`: AI response text → OneBot message segment array
+- `build_prompt_blocks()`: `ParsedMessage` (+ downloads) → ACP prompt blocks (text + optional images)
+- `content_to_onebot()`: `list[ContentPart]` → OneBot message segment array
+- `ai_to_onebot()`: AI response text → OneBot message segment array (text-only convenience wrapper)
 
 ### `config.py`
 
@@ -191,7 +197,8 @@ NcatConfig
 ├── ServerConfig      (host, port)
 ├── AgentConfig       (command, args, cwd)
 ├── UxConfig          (thinking_notify_seconds, thinking_long_notify_seconds,
-│                      permission_timeout, permission_raw_input_max_len)
+│                      permission_timeout, permission_raw_input_max_len,
+│                      image_download_timeout)
 └── LoggingConfig     (level, dir, keep_days, max_total_mb)
 ```
 

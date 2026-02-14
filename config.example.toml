@@ -24,6 +24,8 @@ thinking_long_notify_seconds = 30
 permission_timeout = 300
 # Max characters of raw_input to display in permission request messages (0 for unlimited).
 permission_raw_input_max_len = 500
+# Timeout (seconds) for downloading images from NapCat-provided URLs.
+image_download_timeout = 15.0
 
 [logging]
 # Console output level: DEBUG / INFO / WARNING / ERROR.

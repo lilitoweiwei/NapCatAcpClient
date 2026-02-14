@@ -45,6 +45,7 @@ async def main() -> None:
         thinking_long_notify_seconds=config.ux.thinking_long_notify_seconds,
         permission_timeout=config.ux.permission_timeout,
         permission_raw_input_max_len=config.ux.permission_raw_input_max_len,
+        image_download_timeout=config.ux.image_download_timeout,
     )
 
     try:

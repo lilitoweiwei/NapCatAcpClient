@@ -5,7 +5,10 @@ import asyncio
 import pytest
 import pytest_asyncio
 import websockets
+from acp.schema import ImageContentBlock, TextContentBlock
 
+import ncat.prompt_runner as prompt_runner_module
+from ncat.converter import ContentPart
 from ncat.napcat_server import NcatNapCatServer
 from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
@@ -56,6 +59,111 @@ async def test_full_private_conversation(full_stack) -> None:
     assert chat_id == "private:111"
     assert "[Private chat, user Alice(111)]" in prompt
     assert "hello" in prompt
+
+
+async def test_private_image_forwarded_to_agent_when_supported(full_stack, monkeypatch) -> None:
+    """If agent supports images, ncat should forward an ACP ImageContentBlock."""
+    _, mock, mock_agent = full_stack
+    mock_agent._supports_image = True  # test hook
+
+    async def _fake_download_image(url: str, timeout_seconds: float) -> tuple[str, str] | None:
+        assert url == "http://example.com/a.png"
+        assert timeout_seconds > 0
+        return ("aGVsbG8=", "image/png")
+
+    monkeypatch.setattr(prompt_runner_module, "download_image", _fake_download_image)
+
+    # Send a private message event with an image segment (url field).
+    await mock._send_event(
+        {
+            "self_id": mock.BOT_ID,
+            "user_id": 111,
+            "time": 0,
+            "message_id": mock._next_message_id(),
+            "message_type": "private",
+            "sub_type": "friend",
+            "sender": {"user_id": 111, "nickname": "Alice", "card": ""},
+            "message": [
+                {"type": "text", "data": {"text": "see"}},
+                {"type": "image", "data": {"url": "http://example.com/a.png"}},
+            ],
+            "message_format": "array",
+            "raw_message": "see[CQ:image]",
+            "font": 14,
+            "post_type": "message",
+        }
+    )
+
+    # Consume the QQ reply API call.
+    api_call = await mock.recv_api_call(timeout=5.0)
+    assert api_call is not None
+    assert api_call["action"] == "send_private_msg"
+
+    # Verify prompt blocks sent to agent include an image block.
+    assert mock_agent.calls_blocks
+    _, blocks = mock_agent.calls_blocks[0]
+    assert isinstance(blocks[0], TextContentBlock)
+    assert "[图片]" in blocks[0].text
+    assert any(isinstance(b, ImageContentBlock) for b in blocks)
+
+
+async def test_private_image_download_failed_falls_back_to_url(full_stack, monkeypatch) -> None:
+    """If image download fails, ncat should send '[图片 url=...]' to the agent."""
+    _, mock, mock_agent = full_stack
+    mock_agent._supports_image = True  # test hook
+
+    async def _fake_download_image(_: str, timeout_seconds: float) -> tuple[str, str] | None:
+        assert timeout_seconds > 0
+        return None
+
+    monkeypatch.setattr(prompt_runner_module, "download_image", _fake_download_image)
+
+    await mock._send_event(
+        {
+            "self_id": mock.BOT_ID,
+            "user_id": 111,
+            "time": 0,
+            "message_id": mock._next_message_id(),
+            "message_type": "private",
+            "sub_type": "friend",
+            "sender": {"user_id": 111, "nickname": "Alice", "card": ""},
+            "message": [
+                {"type": "text", "data": {"text": "see"}},
+                {"type": "image", "data": {"url": "http://example.com/a.png"}},
+            ],
+            "message_format": "array",
+            "raw_message": "see[CQ:image]",
+            "font": 14,
+            "post_type": "message",
+        }
+    )
+
+    api_call = await mock.recv_api_call(timeout=5.0)
+    assert api_call is not None
+    assert api_call["action"] == "send_private_msg"
+
+    assert mock_agent.calls_blocks
+    _, blocks = mock_agent.calls_blocks[0]
+    assert isinstance(blocks[0], TextContentBlock)
+    assert "[图片 url=http://example.com/a.png]" in blocks[0].text
+    assert not any(isinstance(b, ImageContentBlock) for b in blocks)
+
+
+async def test_agent_image_reply_sends_image_segment(full_stack) -> None:
+    """If agent returns an image ContentPart, ncat should send an image segment to QQ."""
+    _, mock, mock_agent = full_stack
+    mock_agent.response_parts = [
+        ContentPart(type="image", image_base64="aGVsbG8=", image_mime="image/png")
+    ]
+
+    await mock.send_private_message(111, "Alice", "send image please")
+    api_call = await mock.recv_api_call(timeout=5.0)
+    assert api_call is not None
+    assert api_call["action"] == "send_private_msg"
+
+    seg = api_call["params"]["message"][0]
+    assert seg["type"] == "image"
+    assert seg["data"]["file"] == "base64://aGVsbG8="
 
 
 async def test_full_group_conversation(full_stack) -> None:

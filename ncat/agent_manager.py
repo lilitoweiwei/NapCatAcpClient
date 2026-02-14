@@ -14,18 +14,35 @@ import json
 import logging
 import shutil
 import sys
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from acp import PROTOCOL_VERSION, connect_to_agent, text_block
+from acp import PROTOCOL_VERSION, connect_to_agent
 from acp.core import ClientSideConnection
-from acp.schema import InitializeResponse
+from acp.schema import (
+    AudioContentBlock,
+    EmbeddedResourceContentBlock,
+    ImageContentBlock,
+    InitializeResponse,
+    ResourceContentBlock,
+    TextContentBlock,
+)
 
 from ncat.acp_client import NcatAcpClient
+from ncat.converter import ContentPart
 
 if TYPE_CHECKING:
     from ncat.permission import PermissionBroker
 
 logger = logging.getLogger("ncat.acp_client")
+
+PromptBlock = (
+    TextContentBlock
+    | ImageContentBlock
+    | AudioContentBlock
+    | ResourceContentBlock
+    | EmbeddedResourceContentBlock
+)
 
 
 # --- ACP stream observer for debug logging ---
@@ -84,10 +101,13 @@ class AgentManager:
 
         # Chat-to-session mapping: chat_id -> ACP session_id
         self._sessions: dict[str, str] = {}
-        # Text accumulators: session_id -> list of text chunks
-        self._accumulators: dict[str, list[str]] = {}
+        # Content accumulators: session_id -> ordered content parts
+        self._accumulators: dict[str, list[ContentPart]] = {}
         # Active prompt tracking: chat_id -> True while prompt is in flight
         self._active_prompts: set[str] = set()
+
+        # Agent prompt capabilities (populated on initialize)
+        self._supports_image: bool = False
 
         # Permission broker (set externally after construction)
         self._permission_broker: PermissionBroker | None = None
@@ -174,12 +194,15 @@ class AgentManager:
         }
         raw_response = await self._conn._conn.send_request("initialize", init_params)
         init_result = InitializeResponse.model_validate(raw_response)
+        prompt_caps = getattr(init_result.agent_capabilities, "prompt_capabilities", None)
+        self._supports_image = bool(getattr(prompt_caps, "image", False))
 
         logger.info(
             "ACP initialized: agent=%s protocol_version=%s",
             init_result.agent_info,
             init_result.protocol_version,
         )
+        logger.info("ACP prompt capabilities: image=%s", self._supports_image)
 
     async def stop(self) -> None:
         """Stop the agent subprocess and clean up resources."""
@@ -213,6 +236,11 @@ class AgentManager:
             and self._process.returncode is None
             and self._conn is not None
         )
+
+    @property
+    def supports_image(self) -> bool:
+        """Whether the connected agent supports image blocks in prompts."""
+        return self._supports_image
 
     # --- Permission broker ---
 
@@ -291,12 +319,12 @@ class AgentManager:
             await self.close_session(chat_id)
         logger.info("All sessions closed")
 
-    # --- Text accumulation (called by NcatAcpClient.session_update) ---
+    # --- Content accumulation (called by NcatAcpClient.session_update) ---
 
-    def accumulate_text(self, session_id: str, text: str) -> None:
-        """Accumulate a text chunk for a session (called from session_update callback)."""
+    def accumulate_part(self, session_id: str, part: ContentPart) -> None:
+        """Accumulate a content part for a session (called from session_update callback)."""
         if session_id in self._accumulators:
-            self._accumulators[session_id].append(text)
+            self._accumulators[session_id].append(part)
 
     # --- Prompt sending ---
 
@@ -304,10 +332,10 @@ class AgentManager:
         """Check if there is an active prompt for this chat."""
         return chat_id in self._active_prompts
 
-    async def send_prompt(self, chat_id: str, text: str) -> str:
+    async def send_prompt(self, chat_id: str, prompt: Sequence[PromptBlock]) -> list[ContentPart]:
         """Send a prompt to the agent and wait for the complete response.
 
-        Returns the accumulated response text.
+        Returns the accumulated response parts.
         Raises RuntimeError if the agent is not running.
         Raises Exception on agent errors (caller should handle).
         """
@@ -319,7 +347,7 @@ class AgentManager:
         # Get or create session
         session_id = await self.get_or_create_session(chat_id)
 
-        # Initialize text accumulator for this session
+        # Initialize content accumulator for this session
         self._accumulators[session_id] = []
         self._active_prompts.add(chat_id)
 
@@ -328,21 +356,22 @@ class AgentManager:
             # During this await, session_update callbacks fire to accumulate text.
             response = await self._conn.prompt(
                 session_id=session_id,
-                prompt=[text_block(text)],
+                prompt=list(prompt),
             )
 
-            # Collect accumulated text
+            # Collect accumulated content
             parts = self._accumulators.pop(session_id, [])
-            result = "".join(parts)
+            text_len = sum(len(p.text) for p in parts if p.type == "text")
 
             logger.info(
-                "Prompt completed for %s (session %s): stop_reason=%s, %d chars",
+                "Prompt completed for %s (session %s): stop_reason=%s, text=%d chars, parts=%d",
                 chat_id,
                 session_id,
                 response.stop_reason,
-                len(result),
+                text_len,
+                len(parts),
             )
-            return result
+            return parts
 
         except asyncio.CancelledError:
             # Clean up accumulator on cancellation

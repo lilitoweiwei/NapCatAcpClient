@@ -1,6 +1,15 @@
 """Tests for the message converter module (OneBot <-> internal format)."""
 
-from ncat.converter import ai_to_onebot, build_context_header, onebot_to_internal
+from acp.schema import ImageContentBlock, TextContentBlock
+
+from ncat.converter import (
+    ContentPart,
+    ai_to_onebot,
+    build_context_header,
+    build_prompt_blocks,
+    content_to_onebot,
+    onebot_to_internal,
+)
 
 BOT_ID = 1234567890
 
@@ -86,6 +95,8 @@ def test_parse_mixed_segments() -> None:
     }
     parsed = onebot_to_internal(event, BOT_ID)
     assert parsed.text == "看这个[图片]好看吗[表情]"
+    assert len(parsed.images) == 1
+    assert parsed.images[0].url == "http://example.com/img.jpg"
 
 
 def test_parse_at_other_user() -> None:
@@ -146,6 +157,69 @@ def test_sender_name_fallback_to_nickname() -> None:
 def test_ai_to_onebot() -> None:
     result = ai_to_onebot("Hello world")
     assert result == [{"type": "text", "data": {"text": "Hello world"}}]
+
+
+def test_content_to_onebot_text_and_image() -> None:
+    parts = [
+        ContentPart(type="text", text="hi"),
+        ContentPart(type="image", image_base64="aGVsbG8=", image_mime="image/png"),
+        ContentPart(type="text", text="bye"),
+    ]
+    segments = content_to_onebot(parts)
+    assert segments == [
+        {"type": "text", "data": {"text": "hi"}},
+        {"type": "image", "data": {"file": "base64://aGVsbG8="}},
+        {"type": "text", "data": {"text": "bye"}},
+    ]
+
+
+def test_build_prompt_blocks_image_success() -> None:
+    event = {
+        "self_id": BOT_ID,
+        "user_id": 111,
+        "message_type": "private",
+        "sender": {"user_id": 111, "nickname": "User", "card": ""},
+        "message": [
+            {"type": "text", "data": {"text": "see"}},
+            {"type": "image", "data": {"url": "http://example.com/a.png"}},
+        ],
+        "post_type": "message",
+    }
+    parsed = onebot_to_internal(event, BOT_ID)
+
+    blocks = build_prompt_blocks(
+        parsed,
+        downloaded_images=[("aGVsbG8=", "image/png")],
+        agent_supports_image=True,
+    )
+    assert isinstance(blocks[0], TextContentBlock)
+    assert "[Private chat, user User(111)]" in blocks[0].text
+    assert "[图片]" in blocks[0].text
+    assert any(isinstance(b, ImageContentBlock) for b in blocks)
+
+
+def test_build_prompt_blocks_download_failed_falls_back_to_url() -> None:
+    event = {
+        "self_id": BOT_ID,
+        "user_id": 111,
+        "message_type": "private",
+        "sender": {"user_id": 111, "nickname": "User", "card": ""},
+        "message": [
+            {"type": "text", "data": {"text": "see"}},
+            {"type": "image", "data": {"url": "http://example.com/a.png"}},
+        ],
+        "post_type": "message",
+    }
+    parsed = onebot_to_internal(event, BOT_ID)
+
+    blocks = build_prompt_blocks(
+        parsed,
+        downloaded_images=[None],
+        agent_supports_image=True,
+    )
+    assert isinstance(blocks[0], TextContentBlock)
+    assert "[图片 url=http://example.com/a.png]" in blocks[0].text
+    assert not any(isinstance(b, ImageContentBlock) for b in blocks)
 
 
 # --- build_context_header tests ---

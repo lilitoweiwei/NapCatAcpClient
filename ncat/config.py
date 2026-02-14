@@ -40,6 +40,8 @@ class UxConfig:
     permission_timeout: float = 300
     # Max characters of raw_input to display in permission request messages (0 for unlimited)
     permission_raw_input_max_len: int = 500
+    # Timeout (seconds) for downloading images from NapCat-provided URLs
+    image_download_timeout: float = 15.0
 
 
 @dataclass

@@ -9,7 +9,8 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from ncat.agent_manager import AgentManager
-from ncat.converter import ParsedMessage, build_context_header
+from ncat.converter import ContentPart, ParsedMessage, build_prompt_blocks
+from ncat.image_utils import download_image
 from ncat.permission import PermissionBroker
 
 logger = logging.getLogger("ncat.prompt_runner")
@@ -17,6 +18,9 @@ logger = logging.getLogger("ncat.prompt_runner")
 # Type alias for the reply callback provided by the transport layer.
 # Signature: async reply_fn(event: dict, text: str) -> None
 ReplyFn = Callable[[dict, str], Awaitable[None]]
+# Type alias for mixed content replies (text + images).
+# Signature: async reply_content_fn(event: dict, parts: list[ContentPart]) -> None
+ReplyContentFn = Callable[[dict, list[ContentPart]], Awaitable[None]]
 
 # --- Notification message templates ---
 _MSG_THINKING = "消息已收到，AI 正在思考中，请稍候..."
@@ -37,19 +41,30 @@ class PromptRunner:
         agent_manager: AgentManager,
         reply_fn: ReplyFn,
         permission_broker: PermissionBroker,
+        reply_content_fn: ReplyContentFn | None = None,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
+        image_download_timeout: float = 15.0,
     ) -> None:
         # ACP agent manager for sending prompts and cancellation
         self._agent_manager = agent_manager
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
+
+        # Callback to send a mixed (text+image) reply back to the QQ message source
+        async def _reply_content_fallback(event: dict, parts: list[ContentPart]) -> None:
+            text = "".join(p.text for p in parts if p.type == "text")
+            await self._reply_fn(event, text or "AI 未返回有效回复")
+
+        self._reply_content_fn = reply_content_fn or _reply_content_fallback
         # Permission broker (cancel pending requests on /stop)
         self._permission_broker = permission_broker
         # Seconds before sending first "AI is thinking" notification (0 = disabled)
         self._thinking_notify_seconds = thinking_notify_seconds
         # Seconds before sending "thinking too long, use /stop" notification (0 = disabled)
         self._thinking_long_notify_seconds = thinking_long_notify_seconds
+        # Timeout for downloading images from NapCat URLs (used when agent supports images)
+        self._image_download_timeout = image_download_timeout
         # Active AI processing tasks per chat, keyed by chat_id
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -112,24 +127,49 @@ class PromptRunner:
             )
 
         try:
-            # Build context-enriched prompt text
-            prompt_text = build_context_header(parsed)
+            supports_image = getattr(self._agent_manager, "supports_image", False)
+            downloaded_images: list[tuple[str, str] | None] = []
+            if supports_image:
+                # Download images before sending the prompt so we can attach ACP image blocks.
+                for att in parsed.images:
+                    if att.url:
+                        downloaded_images.append(
+                            await download_image(
+                                att.url,
+                                timeout_seconds=self._image_download_timeout,
+                            )
+                        )
+                    else:
+                        downloaded_images.append(None)
+            else:
+                # Agent does not support images: use pure text fallback.
+                downloaded_images = [None] * len(parsed.images)
+
+            prompt_blocks = build_prompt_blocks(
+                parsed,
+                downloaded_images,
+                agent_supports_image=supports_image,
+            )
 
             # Send prompt to the ACP agent and wait for complete response
-            response_text = await self._agent_manager.send_prompt(chat_key, prompt_text)
+            response_parts = await self._agent_manager.send_prompt(chat_key, prompt_blocks)
 
             # Cancel timers immediately after AI responds to avoid late notifications
             for timer in timers:
                 timer.cancel()
 
             # Send reply based on response
-            if response_text:
+            has_text = any(p.type == "text" and p.text for p in response_parts)
+            has_image = any(p.type == "image" and p.image_base64 for p in response_parts)
+            if has_text or has_image:
+                text_len = sum(len(p.text) for p in response_parts if p.type == "text")
                 logger.info(
-                    "Sending AI reply to %s (%d chars)",
+                    "Sending AI reply to %s (text=%d chars, parts=%d)",
                     chat_key,
-                    len(response_text),
+                    text_len,
+                    len(response_parts),
                 )
-                await self._reply_fn(event, response_text)
+                await self._reply_content_fn(event, response_parts)
             else:
                 logger.warning("Agent returned empty content for %s", chat_key)
                 await self._reply_fn(event, "AI 未返回有效回复")

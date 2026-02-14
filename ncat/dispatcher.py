@@ -1,4 +1,4 @@
-"""Message processing pipeline — thin orchestrator that routes messages.
+"""Message dispatcher — thin orchestrator that routes messages.
 
 Routes incoming QQ message events to either the CommandExecutor (for /commands)
 or the PromptRunner (for AI requests). Handles filtering and busy rejection.
@@ -14,7 +14,7 @@ from ncat.command import CommandExecutor
 from ncat.converter import onebot_to_internal
 from ncat.prompt_runner import PromptRunner
 
-logger = logging.getLogger("ncat.handler")
+logger = logging.getLogger("ncat.dispatcher")
 
 # Type alias for the reply callback provided by the transport layer.
 # Signature: async reply_fn(event: dict, text: str) -> None
@@ -24,9 +24,9 @@ ReplyFn = Callable[[dict, str], Awaitable[None]]
 _MSG_BUSY = "AI 正在思考中，请等待或使用 /stop 中断。"
 
 
-class MessageHandler:
+class MessageDispatcher:
     """
-    Thin orchestrator: parse → filter → route to CommandExecutor or PromptRunner.
+    Thin dispatcher: parse → filter → route to CommandExecutor or PromptRunner.
 
     Decoupled from WebSocket transport: sends replies via the reply_fn callback.
     """

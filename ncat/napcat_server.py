@@ -13,7 +13,7 @@ from websockets.asyncio.server import ServerConnection
 
 from ncat.acp_client import AgentManager
 from ncat.converter import ai_to_onebot
-from ncat.handler import MessageHandler
+from ncat.dispatcher import MessageDispatcher
 
 logger = logging.getLogger("ncat.napcat_server")
 
@@ -23,7 +23,7 @@ class NcatNapCatServer:
     WebSocket server that handles the NapCatQQ transport layer.
 
     Responsibilities: connection lifecycle, event dispatching, API call/response
-    matching, and sending messages. Business logic is delegated to MessageHandler.
+    matching, and sending messages. Business logic is delegated to MessageDispatcher.
     """
 
     def __init__(
@@ -49,8 +49,8 @@ class NcatNapCatServer:
         # Background message-handling tasks (prevent GC from cancelling them)
         self._tasks: set[asyncio.Task[None]] = set()
 
-        # Message handler — business logic, decoupled from transport
-        self._handler = MessageHandler(
+        # Message dispatcher — business logic, decoupled from transport
+        self._dispatcher = MessageDispatcher(
             agent_manager=agent_manager,
             reply_fn=self._reply_text,
             thinking_notify_seconds=thinking_notify_seconds,
@@ -132,7 +132,7 @@ class NcatNapCatServer:
             )
             # Delegate to message handler in a separate task
             if self._bot_id is not None:
-                task = asyncio.create_task(self._handler.handle_message(event, self._bot_id))
+                task = asyncio.create_task(self._dispatcher.handle_message(event, self._bot_id))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
             else:

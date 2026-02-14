@@ -32,7 +32,7 @@ ncat/
 ├── config.py                Configuration loading (config.toml → dataclasses)
 ├── log.py                   Logging setup (console + rotating file handler)
 ├── napcat_server.py         NapCat-facing WebSocket server (transport layer)
-├── handler.py               Message dispatcher (parse → filter → route)
+├── dispatcher.py            Message dispatcher (parse → filter → route)
 ├── prompt_runner.py         Prompt lifecycle manager (timeout, send, cancel)
 ├── command.py               Command executor (/new, /stop, /help)
 ├── converter.py             Message format conversion (OneBot ↔ internal)
@@ -51,7 +51,7 @@ NapCatQQ
 NcatNapCatServer._dispatch_event()
   │ Filters meta/notice/request events; dispatches message events
   ▼
-MessageHandler.handle_message()
+MessageDispatcher.handle_message()
   │ Parses OneBot event → ParsedMessage
   │ Filters group messages without @bot
   │ Tries CommandExecutor first (for /commands)
@@ -96,9 +96,9 @@ The transport layer facing NapCatQQ. Responsibilities:
 - Reply sending (`send_private_msg` / `send_group_msg`)
 - Closing all ACP sessions on NapCat disconnect
 
-Does **not** contain any business logic — delegates to `MessageHandler`.
+Does **not** contain any business logic — delegates to `MessageDispatcher`.
 
-### `handler.py` — MessageHandler
+### `dispatcher.py` — MessageDispatcher
 
 Thin message dispatcher. Pipeline:
 
@@ -189,7 +189,7 @@ main.py
   ├── log.py
   ├── acp_client.py        (AgentManager)
   └── napcat_server.py     (NcatNapCatServer)
-        └── handler.py     (MessageHandler)
+        └── dispatcher.py  (MessageDispatcher)
               ├── prompt_runner.py  (PromptRunner)
               │     ├── acp_client.py  (AgentManager)
               │     └── converter.py

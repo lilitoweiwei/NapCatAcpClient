@@ -1,4 +1,4 @@
-"""Tests for the message handler (business logic, no WebSocket needed)."""
+"""Tests for the message dispatcher (business logic, no WebSocket needed)."""
 
 import asyncio
 import contextlib
@@ -6,7 +6,7 @@ import contextlib
 import pytest
 import pytest_asyncio
 
-from ncat.handler import MessageHandler
+from ncat.dispatcher import MessageDispatcher
 from tests.conftest import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
@@ -36,10 +36,10 @@ class ReplyCollector:
 
 @pytest_asyncio.fixture
 async def handler_env():
-    """Create a MessageHandler with mock agent manager and reply collector."""
+    """Create a MessageDispatcher with mock agent manager and reply collector."""
     mock_agent = MockAgentManager()
     replies = ReplyCollector()
-    handler = MessageHandler(
+    handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
     )
@@ -52,7 +52,7 @@ async def timeout_env():
     """Create a handler with short timeout thresholds for testing notifications."""
     mock_agent = MockAgentManager()
     replies = ReplyCollector()
-    handler = MessageHandler(
+    handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
         thinking_notify_seconds=0.3,

@@ -26,6 +26,7 @@ HELP_TEXT = (
     "ncat 指令列表：\n"
     "/new  - 创建新会话（清空 AI 上下文）\n"
     "/stop - 中断当前 AI 思考\n"
+    "/send <text> - 将文本原样转发给 agent（不触发 ncat 指令）\n"
     "/help - 显示本帮助信息\n"
     "直接发送文字即可与 AI 对话。"
 )

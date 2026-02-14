@@ -11,7 +11,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from ncat.acp_client import AgentManager
-from ncat.command import CommandExecutor
+from ncat.command import HELP_TEXT, CommandExecutor
 from ncat.converter import onebot_to_internal
 from ncat.permission import PermissionBroker
 from ncat.prompt_runner import PromptRunner
@@ -74,10 +74,11 @@ class MessageDispatcher:
 
         Routing order:
         1. Filter (group @bot check)
-        2. Commands (/new, /stop, /help)
-        3. Pending permission replies (intercept all non-command messages)
-        4. Busy rejection (AI already processing)
-        5. AI prompt dispatch
+        2. /send prefix stripping (forward to agent bypassing commands)
+        3. Commands (/new, /stop, /help)
+        4. Pending permission replies (intercept all non-command messages)
+        5. Busy rejection (AI already processing)
+        6. AI prompt dispatch
 
         Args:
             event: Raw OneBot 11 message event dict
@@ -108,11 +109,26 @@ class MessageDispatcher:
             # for reply routing when the agent requests permission)
             self._agent_manager.set_last_event(parsed.chat_id, event)
 
-            # Step 3: Try to handle as a command (lightweight, non-blocking)
-            if await self._cmd.try_handle(parsed, event):
+            # Step 3: Handle /send — strip prefix and forward as a regular
+            # message so that agent slash commands (e.g. /help) don't collide
+            # with ncat's own commands.
+            send_forwarded = False
+            if parsed.text.startswith("/send"):
+                rest = parsed.text[5:]  # strip "/send"
+                if not rest or rest[0] == " ":
+                    body = rest.lstrip(" ") if rest else ""
+                    if not body:
+                        # /send with no payload — show usage hint
+                        await self._reply_fn(event, HELP_TEXT)
+                        return
+                    parsed.text = body
+                    send_forwarded = True
+
+            # Step 4: Try to handle as a command (skip if /send forwarded)
+            if not send_forwarded and await self._cmd.try_handle(parsed, event):
                 return
 
-            # Step 4: Check for pending permission request — intercept all
+            # Step 5: Check for pending permission request — intercept all
             # non-command messages when a permission reply is expected
             if self._permission_broker.has_pending(parsed.chat_id):
                 if self._permission_broker.try_resolve(parsed.chat_id, parsed.text):
@@ -122,7 +138,7 @@ class MessageDispatcher:
                     await self._reply_fn(event, _MSG_PERMISSION_HINT)
                 return
 
-            # Step 5: Reject if AI is already processing for this chat
+            # Step 6: Reject if AI is already processing for this chat
             if self._ai.is_busy(parsed.chat_id):
                 logger.info(
                     "Busy rejection for %s (AI already processing)",
@@ -131,7 +147,7 @@ class MessageDispatcher:
                 await self._reply_fn(event, _MSG_BUSY)
                 return
 
-            # Step 6: Dispatch to AI prompt runner
+            # Step 7: Dispatch to AI prompt runner
             await self._ai.process(parsed, event)
 
         except asyncio.CancelledError:

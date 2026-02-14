@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 
 from ncat.acp_client import AgentManager
 from ncat.converter import ParsedMessage, build_context_header
+from ncat.permission import PermissionBroker
 
 logger = logging.getLogger("ncat.prompt_runner")
 
@@ -35,6 +36,7 @@ class PromptRunner:
         self,
         agent_manager: AgentManager,
         reply_fn: ReplyFn,
+        permission_broker: PermissionBroker,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
     ) -> None:
@@ -42,6 +44,8 @@ class PromptRunner:
         self._agent_manager = agent_manager
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
+        # Permission broker (cancel pending requests on /stop)
+        self._permission_broker = permission_broker
         # Seconds before sending first "AI is thinking" notification (0 = disabled)
         self._thinking_notify_seconds = thinking_notify_seconds
         # Seconds before sending "thinking too long, use /stop" notification (0 = disabled)
@@ -57,11 +61,17 @@ class PromptRunner:
         """
         Cancel the active AI task for the given chat.
 
+        Also cancels any pending permission request for this chat (the
+        PermissionBroker future will be cancelled, causing the ACP handler
+        to return a DeniedOutcome).
+
         Returns True if a task was found and cancellation was requested,
         False if no active task exists for this chat.
         """
         task = self._active_tasks.get(chat_id)
         if task is not None and not task.done():
+            # Cancel any pending permission request first (resolves immediately)
+            self._permission_broker.cancel_pending(chat_id)
             task.cancel()
             # Also send ACP cancel notification to the agent
             cancel_task = asyncio.create_task(self._agent_manager.cancel(chat_id))

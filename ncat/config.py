@@ -36,6 +36,10 @@ class UxConfig:
     thinking_notify_seconds: float = 10
     # Seconds before sending "AI thinking too long, use /stop" notification (0 to disable)
     thinking_long_notify_seconds: float = 30
+    # Seconds before an unanswered permission request is auto-cancelled (0 to wait forever)
+    permission_timeout: float = 300
+    # Max characters of raw_input to display in permission request messages (0 for unlimited)
+    permission_raw_input_max_len: int = 500
 
 
 @dataclass

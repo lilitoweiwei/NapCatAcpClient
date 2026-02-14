@@ -34,6 +34,7 @@ ncat/
 ├── napcat_server.py         NapCat-facing WebSocket server (transport layer)
 ├── dispatcher.py            Message dispatcher (parse → filter → route)
 ├── prompt_runner.py         Prompt lifecycle manager (timeout, send, cancel)
+├── permission.py            Permission broker (forward ACP requests to QQ users)
 ├── command.py               Command executor (/new, /stop, /help)
 ├── converter.py             Message format conversion (OneBot ↔ internal)
 ├── acp_client.py            ACP protocol callbacks + agent subprocess manager
@@ -55,6 +56,7 @@ MessageDispatcher.handle_message()
   │ Parses OneBot event → ParsedMessage
   │ Filters group messages without @bot
   │ Tries CommandExecutor first (for /commands)
+  │ Checks PermissionBroker for pending permission → intercepts reply
   │ Checks busy state (rejects if AI already processing)
   ▼
 PromptRunner.process()
@@ -69,6 +71,13 @@ AgentManager.send_prompt()
   │   (during await, agent streams chunks)   │ NcatAcpClient            │
   │ ◄─────────────────────────────────────── │   .session_update()      │
   │                                          │   accumulates text       │
+  │                                          └──────────────────────────┘
+  │                                          ┌──────────────────────────┐
+  │   (agent requests tool permission)       │ NcatAcpClient            │
+  │ ◄─────────────────────────────────────── │   .request_permission()  │
+  │                                          │   → PermissionBroker     │
+  │                                          │     → sends QQ message   │
+  │                                          │     → awaits user reply  │
   │                                          └──────────────────────────┘
   │ Returns accumulated response text
   ▼
@@ -105,8 +114,9 @@ Thin message dispatcher. Pipeline:
 1. Parse raw event → `ParsedMessage` (via `converter.onebot_to_internal`)
 2. Filter: ignore group messages without @bot
 3. Route to `CommandExecutor.try_handle()` (lightweight, non-blocking)
-4. Check `PromptRunner.is_busy()` → reject if already processing
-5. Dispatch to `PromptRunner.process()`
+4. Check `PermissionBroker.has_pending()` → intercept reply or show hint
+5. Check `PromptRunner.is_busy()` → reject if already processing
+6. Dispatch to `PromptRunner.process()`
 
 ### `prompt_runner.py` — PromptRunner
 
@@ -131,19 +141,34 @@ Parses and executes user commands:
 
 Uses callback injection (`cancel_fn`) to avoid direct dependency on `PromptRunner`.
 
+### `permission.py` — PermissionBroker
+
+Bridges ACP permission requests with QQ user interaction:
+
+- **"Always" cache**: Remembers `allow_always` / `reject_always` decisions
+  per session, keyed by `ToolCallUpdate.kind` (including `None` as a key).
+- **Pending request**: At most one per chat. Creates an `asyncio.Future`,
+  sends a formatted message to the QQ user, and awaits the reply.
+- **Timeout**: Configurable via `permission_timeout` (0 = wait forever).
+- **Cancellation**: `/stop` cancels the pending permission future.
+- **Session cleanup**: `clear_session()` removes cached decisions when a
+  session is closed.
+
 ### `acp_client.py` — NcatAcpClient + AgentManager
 
 Contains two classes with distinct responsibilities:
 
 **NcatAcpClient** (ACP protocol callbacks):
 - `session_update`: Accumulates `AgentMessageChunk` text into `AgentManager`
-- `request_permission`: Auto-approves all tool call permission requests
+- `request_permission`: Delegates to `PermissionBroker` for interactive
+  user approval (reverse-looks up `chat_id` from `session_id`)
 - File system / terminal methods: All rejected (`method_not_found`)
 
 **AgentManager** (agent subprocess + session lifecycle):
 - Spawns agent subprocess, establishes ACP connection over stdio
 - Initializes ACP protocol handshake
-- Maps `chat_id` (QQ chat identifier) → ACP `session_id`
+- Maps `chat_id` (QQ chat identifier) → ACP `session_id` (bidirectional)
+- Stores last event per chat for permission reply routing
 - Sends prompts and collects accumulated responses
 - Handles cancellation via ACP `session/cancel`
 - Manages agent process start/stop
@@ -164,7 +189,8 @@ Configuration hierarchy loaded from `config.toml`:
 NcatConfig
 ├── ServerConfig      (host, port)
 ├── AgentConfig       (command, args, cwd)
-├── UxConfig          (thinking_notify_seconds, thinking_long_notify_seconds)
+├── UxConfig          (thinking_notify_seconds, thinking_long_notify_seconds,
+│                      permission_timeout, permission_raw_input_max_len)
 └── LoggingConfig     (level, dir, keep_days, max_total_mb)
 ```
 
@@ -187,18 +213,25 @@ chat_id (e.g. "private:12345")  →  ACP session_id (UUID)
 main.py
   ├── config.py
   ├── log.py
-  ├── acp_client.py        (AgentManager)
-  └── napcat_server.py     (NcatNapCatServer)
-        └── dispatcher.py  (MessageDispatcher)
-              ├── prompt_runner.py  (PromptRunner)
-              │     ├── acp_client.py  (AgentManager)
+  ├── acp_client.py          (AgentManager)
+  └── napcat_server.py       (NcatNapCatServer)
+        ├── permission.py    (PermissionBroker)
+        └── dispatcher.py    (MessageDispatcher)
+              ├── permission.py      (PermissionBroker)
+              ├── prompt_runner.py   (PromptRunner)
+              │     ├── permission.py    (PermissionBroker)
+              │     ├── acp_client.py    (AgentManager)
               │     └── converter.py
-              ├── command.py        (CommandExecutor)
-              │     └── acp_client.py  (AgentManager)
+              ├── command.py         (CommandExecutor)
+              │     └── acp_client.py    (AgentManager)
               └── converter.py
 ```
 
+`NcatAcpClient` (inside `acp_client.py`) references `PermissionBroker` via
+the `AgentManager.permission_broker` property (TYPE_CHECKING import to
+avoid circular dependency).
+
 Key design principle: dependencies flow **inward** — transport modules
-(`napcat_server`) know about business logic (`handler`, `prompt_runner`),
+(`napcat_server`) know about business logic (`dispatcher`, `prompt_runner`),
 but business logic does not import transport. Reply delivery uses an
 injected callback (`reply_fn`).

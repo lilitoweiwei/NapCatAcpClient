@@ -14,6 +14,7 @@ from websockets.asyncio.server import ServerConnection
 from ncat.acp_client import AgentManager
 from ncat.converter import ai_to_onebot
 from ncat.dispatcher import MessageDispatcher
+from ncat.permission import PermissionBroker
 
 logger = logging.getLogger("ncat.napcat_server")
 
@@ -33,6 +34,8 @@ class NcatNapCatServer:
         agent_manager: AgentManager,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
+        permission_timeout: float = 300,
+        permission_raw_input_max_len: int = 500,
     ) -> None:
         # WebSocket bind address and port
         self._host = host
@@ -49,10 +52,20 @@ class NcatNapCatServer:
         # Background message-handling tasks (prevent GC from cancelling them)
         self._tasks: set[asyncio.Task[None]] = set()
 
+        # Permission broker — forwarding permission requests to QQ users
+        permission_broker = PermissionBroker(
+            reply_fn=self._reply_text,
+            timeout=permission_timeout,
+            raw_input_max_len=permission_raw_input_max_len,
+        )
+        # Wire the broker into the agent manager so NcatAcpClient can use it
+        agent_manager.permission_broker = permission_broker
+
         # Message dispatcher — business logic, decoupled from transport
         self._dispatcher = MessageDispatcher(
             agent_manager=agent_manager,
             reply_fn=self._reply_text,
+            permission_broker=permission_broker,
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
         )

@@ -12,7 +12,7 @@ import json
 import logging
 import shutil
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from acp import (
     PROTOCOL_VERSION,
@@ -50,6 +50,9 @@ from acp.schema import (
     WriteTextFileResponse,
 )
 
+if TYPE_CHECKING:
+    from ncat.permission import PermissionBroker
+
 logger = logging.getLogger("ncat.acp_client")
 
 
@@ -57,8 +60,8 @@ class NcatAcpClient(Client):
     """ACP Client protocol implementation for ncat.
 
     Handles callbacks from the ACP agent: accumulates response text from
-    session_update notifications, auto-approves permission requests, and
-    rejects unsupported capabilities (fs, terminal).
+    session_update notifications, forwards permission requests to QQ users
+    via PermissionBroker, and rejects unsupported capabilities (fs, terminal).
     """
 
     def __init__(self, agent_manager: "AgentManager") -> None:
@@ -105,24 +108,38 @@ class NcatAcpClient(Client):
         tool_call: ToolCallUpdate,
         **kwargs: Any,
     ) -> RequestPermissionResponse:
-        """Auto-approve all permission requests.
+        """Forward permission requests to the QQ user via PermissionBroker.
 
-        Selects the first 'allow_once' option, or falls back to first option.
+        Looks up the chat_id for this session, retrieves the last event for
+        reply routing, and delegates to the PermissionBroker which handles
+        caching, user interaction, and timeout.
         """
-        # Prefer allow_once, then any allow option
-        for opt in options:
-            if opt.kind == "allow_once":
-                logger.info("Auto-approving tool call (allow_once): %s", opt.name)
-                return RequestPermissionResponse(
-                    outcome=AllowedOutcome(outcome="selected", option_id=opt.option_id)
-                )
+        broker = self._agent_manager.permission_broker
+        if broker is None:
+            # Fallback: auto-approve if no broker is configured (should not happen)
+            logger.warning("No PermissionBroker configured, auto-approving")
+            first = options[0]
+            return RequestPermissionResponse(
+                outcome=AllowedOutcome(outcome="selected", option_id=first.option_id)
+            )
 
-        # Fallback: select the first option regardless of kind
-        first = options[0]
-        logger.info("Auto-approving tool call (fallback to first option): %s", first.name)
-        return RequestPermissionResponse(
-            outcome=AllowedOutcome(outcome="selected", option_id=first.option_id)
-        )
+        # Reverse lookup: session_id -> chat_id
+        chat_id = self._agent_manager.get_chat_id(session_id)
+        if chat_id is None:
+            logger.error("No chat_id found for session %s, cancelling permission", session_id)
+            from acp.schema import DeniedOutcome
+
+            return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
+
+        # Retrieve the last event for this chat so we can send reply messages
+        event = self._agent_manager.get_last_event(chat_id)
+        if event is None:
+            logger.error("No event context for chat %s, cancelling permission", chat_id)
+            from acp.schema import DeniedOutcome
+
+            return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
+
+        return await broker.handle(session_id, chat_id, event, tool_call, options)
 
     # --- Unsupported capabilities (fs, terminal) ---
 
@@ -245,6 +262,11 @@ class AgentManager:
         # Active prompt tracking: chat_id -> True while prompt is in flight
         self._active_prompts: set[str] = set()
 
+        # Permission broker (set externally after construction)
+        self._permission_broker: PermissionBroker | None = None
+        # Last event dict per chat (needed for permission reply routing)
+        self._last_events: dict[str, dict] = {}
+
     # --- Lifecycle ---
 
     async def start(self) -> None:
@@ -334,10 +356,11 @@ class AgentManager:
 
     async def stop(self) -> None:
         """Stop the agent subprocess and clean up resources."""
-        # Clear all session mappings
+        # Clear all session mappings and event references
         self._sessions.clear()
         self._accumulators.clear()
         self._active_prompts.clear()
+        self._last_events.clear()
 
         # Close the ACP connection
         if self._conn is not None:
@@ -363,6 +386,32 @@ class AgentManager:
             and self._process.returncode is None
             and self._conn is not None
         )
+
+    # --- Permission broker ---
+
+    @property
+    def permission_broker(self) -> "PermissionBroker | None":
+        """Get the permission broker (set externally after construction)."""
+        return self._permission_broker
+
+    @permission_broker.setter
+    def permission_broker(self, broker: "PermissionBroker") -> None:
+        self._permission_broker = broker
+
+    def get_chat_id(self, session_id: str) -> str | None:
+        """Reverse lookup: find the chat_id that owns this ACP session."""
+        for chat_id, sid in self._sessions.items():
+            if sid == session_id:
+                return chat_id
+        return None
+
+    def get_last_event(self, chat_id: str) -> dict | None:
+        """Get the last message event for a chat (used for reply routing)."""
+        return self._last_events.get(chat_id)
+
+    def set_last_event(self, chat_id: str, event: dict) -> None:
+        """Store the last message event for a chat."""
+        self._last_events[chat_id] = event
 
     # --- Session management ---
 
@@ -395,12 +444,18 @@ class AgentManager:
 
         ACP has no explicit session close; we simply remove the mapping
         so a new session will be created on next interaction.
+        Also clears any "always" permission decisions for this session.
         """
         session_id = self._sessions.pop(chat_id, None)
         if session_id:
             # Clean up any pending accumulator
             self._accumulators.pop(session_id, None)
+            # Clear cached "always" permission decisions for this session
+            if self._permission_broker is not None:
+                self._permission_broker.clear_session(session_id)
             logger.info("Closed session %s for chat %s", session_id, chat_id)
+        # Clean up last event reference
+        self._last_events.pop(chat_id, None)
 
     async def close_all_sessions(self) -> None:
         """Close all active sessions (e.g. on NapCat disconnect)."""

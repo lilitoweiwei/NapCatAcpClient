@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 
 from ncat.dispatcher import MessageDispatcher
+from ncat.permission import PermissionBroker
 from tests.conftest import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
@@ -39,9 +40,13 @@ async def handler_env():
     """Create a MessageDispatcher with mock agent manager and reply collector."""
     mock_agent = MockAgentManager()
     replies = ReplyCollector()
+    # PermissionBroker with long timeout (won't fire in normal tests)
+    broker = PermissionBroker(reply_fn=replies, timeout=300)
+    mock_agent.permission_broker = broker
     handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
+        permission_broker=broker,
     )
 
     yield handler, mock_agent, replies
@@ -52,9 +57,12 @@ async def timeout_env():
     """Create a handler with short timeout thresholds for testing notifications."""
     mock_agent = MockAgentManager()
     replies = ReplyCollector()
+    broker = PermissionBroker(reply_fn=replies, timeout=300)
+    mock_agent.permission_broker = broker
     handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
+        permission_broker=broker,
         thinking_notify_seconds=0.3,
         thinking_long_notify_seconds=0.8,
     )

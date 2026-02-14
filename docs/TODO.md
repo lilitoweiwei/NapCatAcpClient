@@ -8,10 +8,10 @@
 - [x] Immediate notification after receiving a message (before AI finishes)
 
 ## Planned
-- [ ] Forward permission requests to QQ user for interactive approval
+- [x] Forward permission requests to QQ user for interactive approval
+- [ ] 添加`/send`指令用于将消息原封不动转发给agent，从而能够调用agent自己的slash command
 - [ ] Expose NapCat capabilities as MCP server for agent
 - [ ] Image support
 - [ ] Agent process auto-restart on crash
 - [ ] Smarter group filtering (listen to all messages, reply when relevant)
-- [ ] Memory mechanism
 - [ ] Configurable context header (currently hardcoded)

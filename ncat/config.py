@@ -26,6 +26,8 @@ class AgentConfig:
     args: list[str] = field(default_factory=list)
     # Working directory for the agent process
     cwd: str = "~/.ncat/workspace"
+    # Extra environment variables for the agent process (merged with system env)
+    env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

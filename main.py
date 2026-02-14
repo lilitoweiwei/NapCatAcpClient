@@ -32,6 +32,7 @@ async def main() -> None:
         command=config.agent.command,
         args=config.agent.args,
         cwd=str(cwd),
+        env=config.agent.env or None,
     )
     await agent_manager.start()
     logger.info("ACP agent started")

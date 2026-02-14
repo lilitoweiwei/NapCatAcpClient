@@ -22,7 +22,7 @@ Supported content:
 ## Prerequisites
 
 - NapCatQQ configured in **reverse WebSocket** (OneBot v11) mode
-- An **ACP-compatible agent** executable (configured via `agent.command` / `agent.args`)
+- An **ACP-compatible agent** executable (configured via `agent.command` / `agent.args` / `agent.env`)
 - Python **3.12+** and `uv`
 
 ## Quick Start
@@ -59,7 +59,7 @@ Then configure NapCatQQ to connect to ncat's WebSocket server (default: `ws://12
 Copy `config.example.toml` to `config.toml` and customize. Key settings:
 
 - `server.host` / `server.port` — WebSocket bind address + port for NapCatQQ to connect to
-- `agent.command` / `agent.args` / `agent.cwd` — ACP agent subprocess command line + working directory
+- `agent.command` / `agent.args` / `agent.cwd` / `agent.env` — ACP agent subprocess command line, working directory, and environment variables (e.g. API keys, proxy)
 - `ux.thinking_notify_seconds` / `ux.thinking_long_notify_seconds` — "AI is thinking" notifications
 - `ux.permission_timeout` / `ux.permission_raw_input_max_len` — permission prompt behavior
 - `ux.image_download_timeout` — timeout (seconds) for downloading images from NapCat-provided URLs

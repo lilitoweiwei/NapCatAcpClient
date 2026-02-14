@@ -14,6 +14,13 @@ command = "claude"
 args = []
 # Working directory for the agent process. Tilde (~) is expanded at runtime.
 cwd = "~/.ncat/workspace"
+# Extra environment variables passed to the agent process.
+# These are merged with the system environment (and override on conflict).
+# Useful for API keys, proxy settings, etc.
+[agent.env]
+# GEMINI_API_KEY = "your-api-key-here"
+# ANTHROPIC_API_KEY = "your-api-key-here"
+# HTTPS_PROXY = "http://127.0.0.1:7890"
 
 [ux]
 # Seconds before sending "AI is thinking" notification (0 to disable).

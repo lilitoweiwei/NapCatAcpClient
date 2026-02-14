@@ -173,6 +173,7 @@ Bridges ACP permission requests with QQ user interaction:
 
 **AgentProcess** (agent subprocess lifecycle):
 - Resolves and starts the agent executable (with Windows `.cmd`/`.bat` support)
+- Merges `agent.env` config with system environment for the subprocess
 - Establishes ACP connection over stdin/stdout
 - Initializes ACP protocol handshake (custom init bypassing SDK defaults)
 - Tracks agent prompt capabilities (e.g. whether images are supported)
@@ -219,7 +220,7 @@ Configuration hierarchy loaded from `config.toml`:
 ```
 NcatConfig
 ├── ServerConfig      (host, port)
-├── AgentConfig       (command, args, cwd)
+├── AgentConfig       (command, args, cwd, env)
 ├── UxConfig          (thinking_notify_seconds, thinking_long_notify_seconds,
 │                      permission_timeout, permission_raw_input_max_len,
 │                      image_download_timeout)

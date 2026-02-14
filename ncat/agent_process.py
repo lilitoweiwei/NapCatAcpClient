@@ -13,6 +13,7 @@ import asyncio.subprocess as aio_subprocess
 import contextlib
 import json
 import logging
+import os
 import shutil
 import sys
 from typing import Any
@@ -67,7 +68,11 @@ def _acp_stream_observer(event: Any) -> None:
     arrow = "←" if direction == "incoming" else "→"
     logger.debug(
         "ACP %s [%s] id=%s method=%s: %s",
-        arrow, direction, msg_id, method, raw,
+        arrow,
+        direction,
+        msg_id,
+        method,
+        raw,
     )
 
 
@@ -75,19 +80,27 @@ class AgentProcess:
     """Manages the ACP agent subprocess and connection lifecycle.
 
     Responsibilities:
-    - Resolve and start the agent executable (with Windows .cmd support)
+    - Resolve and start the agent executable (with Windows .cmd/.bat support)
     - Establish ACP connection over stdin/stdout
     - Initialize ACP protocol handshake
     - Track agent capabilities (e.g. image support)
     - Stop the subprocess and close the connection
     """
 
-    def __init__(self, command: str, args: list[str], cwd: str) -> None:
+    def __init__(
+        self,
+        command: str,
+        args: list[str],
+        cwd: str,
+        env: dict[str, str] | None = None,
+    ) -> None:
         # Agent executable and arguments
         self._command = command
         self._args = args
         # Working directory for the agent process
         self._cwd = cwd
+        # Extra environment variables (merged with system env at start time)
+        self._extra_env = env or {}
 
         # Agent subprocess handle
         self._process: aio_subprocess.Process | None = None
@@ -135,26 +148,29 @@ class AgentProcess:
             self._cwd,
         )
 
+        # Build subprocess environment: inherit system env, overlay user extras.
+        # We always pass an explicit env dict so extra vars take effect.
+        proc_env: dict[str, str] | None = None
+        if self._extra_env:
+            proc_env = {**os.environ, **self._extra_env}
+            logger.info(
+                "Agent extra env vars: %s",
+                ", ".join(self._extra_env.keys()),
+            )
+
         # Resolve the executable path. On Windows, create_subprocess_exec cannot
         # run .cmd/.bat scripts directly (WinError 193), so we resolve the full
         # path via shutil.which() and let the shell handle it.
         resolved = shutil.which(self._command)
         if resolved is None:
-            raise FileNotFoundError(
-                f"Agent command not found: {self._command}"
-            )
+            raise FileNotFoundError(f"Agent command not found: {self._command}")
 
         # On Windows, .cmd/.bat wrappers (e.g. npm-installed tools) must be
         # executed through the shell. On Linux this is not needed.
-        use_shell = (
-            sys.platform == "win32"
-            and resolved.lower().endswith((".cmd", ".bat"))
-        )
+        use_shell = sys.platform == "win32" and resolved.lower().endswith((".cmd", ".bat"))
         if use_shell:
             shell_args = [resolved, *self._args]
-            logger.debug(
-                "Using shell execution for .cmd wrapper: %s", resolved
-            )
+            logger.debug("Using shell execution for .cmd wrapper: %s", resolved)
             self._process = await asyncio.create_subprocess_exec(
                 "cmd",
                 "/c",
@@ -162,6 +178,7 @@ class AgentProcess:
                 stdin=aio_subprocess.PIPE,
                 stdout=aio_subprocess.PIPE,
                 cwd=self._cwd,
+                env=proc_env,
             )
         else:
             # Direct exec (Linux, or native .exe on Windows)
@@ -171,12 +188,11 @@ class AgentProcess:
                 stdin=aio_subprocess.PIPE,
                 stdout=aio_subprocess.PIPE,
                 cwd=self._cwd,
+                env=proc_env,
             )
 
         if self._process.stdin is None or self._process.stdout is None:
-            raise RuntimeError(
-                "Agent process does not expose stdio pipes"
-            )
+            raise RuntimeError("Agent process does not expose stdio pipes")
 
         # Establish ACP connection over stdin/stdout.
         # Register a stream observer to log all JSON-RPC messages for debugging.
@@ -209,13 +225,11 @@ class AgentProcess:
                 "version": "0.2.0",
             },
         }
-        raw_response = await self._conn._conn.send_request(
-            "initialize", init_params
-        )
+        logger.debug(f"init_params: {init_params}")
+        logger.info("Initializing ACP connection...")
+        raw_response = await self._conn._conn.send_request("initialize", init_params)
         init_result = InitializeResponse.model_validate(raw_response)
-        prompt_caps = getattr(
-            init_result.agent_capabilities, "prompt_capabilities", None
-        )
+        prompt_caps = getattr(init_result.agent_capabilities, "prompt_capabilities", None)
         self._supports_image = bool(getattr(prompt_caps, "image", False))
 
         logger.info(
@@ -223,9 +237,7 @@ class AgentProcess:
             init_result.agent_info,
             init_result.protocol_version,
         )
-        logger.info(
-            "ACP prompt capabilities: image=%s", self._supports_image
-        )
+        logger.info("ACP prompt capabilities: image=%s", self._supports_image)
 
     async def stop(self) -> None:
         """Stop the agent subprocess and close the ACP connection."""
@@ -237,9 +249,7 @@ class AgentProcess:
 
         # Terminate the agent subprocess
         if self._process is not None and self._process.returncode is None:
-            logger.info(
-                "Terminating agent subprocess (pid=%s)", self._process.pid
-            )
+            logger.info("Terminating agent subprocess (pid=%s)", self._process.pid)
             self._process.terminate()
             with contextlib.suppress(ProcessLookupError):
                 await self._process.wait()

@@ -34,9 +34,20 @@ class AgentManager:
     - Delegate subprocess lifecycle to AgentProcess
     """
 
-    def __init__(self, command: str, args: list[str], cwd: str) -> None:
+    def __init__(
+        self,
+        command: str,
+        args: list[str],
+        cwd: str,
+        env: dict[str, str] | None = None,
+    ) -> None:
         # Agent subprocess and ACP connection manager
-        self._process = AgentProcess(command=command, args=args, cwd=cwd)
+        self._process = AgentProcess(
+            command=command,
+            args=args,
+            cwd=cwd,
+            env=env,
+        )
 
         # Chat-to-session mapping: chat_id -> ACP session_id
         self._sessions: dict[str, str] = {}
@@ -129,9 +140,7 @@ class AgentManager:
         session_id = session.session_id
         self._sessions[chat_id] = session_id
 
-        logger.info(
-            "Created ACP session %s for chat %s", session_id, chat_id
-        )
+        logger.info("Created ACP session %s for chat %s", session_id, chat_id)
         return session_id
 
     async def close_session(self, chat_id: str) -> None:
@@ -148,9 +157,7 @@ class AgentManager:
             # Clear cached "always" permission decisions for this session
             if self._permission_broker is not None:
                 self._permission_broker.clear_session(session_id)
-            logger.info(
-                "Closed session %s for chat %s", session_id, chat_id
-            )
+            logger.info("Closed session %s for chat %s", session_id, chat_id)
         # Clean up last event reference
         self._last_events.pop(chat_id, None)
 
@@ -177,9 +184,7 @@ class AgentManager:
         """Check if there is an active prompt for this chat."""
         return chat_id in self._active_prompts
 
-    async def send_prompt(
-        self, chat_id: str, prompt: Sequence[PromptBlock]
-    ) -> list[ContentPart]:
+    async def send_prompt(self, chat_id: str, prompt: Sequence[PromptBlock]) -> list[ContentPart]:
         """Send a prompt to the agent and wait for the complete response.
 
         Returns the accumulated response parts.
@@ -210,13 +215,10 @@ class AgentManager:
 
             # Collect accumulated content
             parts = self._accumulators.pop(session_id, [])
-            text_len = sum(
-                len(p.text) for p in parts if p.type == "text"
-            )
+            text_len = sum(len(p.text) for p in parts if p.type == "text")
 
             logger.info(
-                "Prompt completed for %s (session %s): "
-                "stop_reason=%s, text=%d chars, parts=%d",
+                "Prompt completed for %s (session %s): stop_reason=%s, text=%d chars, parts=%d",
                 chat_id,
                 session_id,
                 response.stop_reason,

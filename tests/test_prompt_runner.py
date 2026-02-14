@@ -5,7 +5,7 @@ import contextlib
 
 import pytest
 
-from ncat.converter import ParsedMessage
+from ncat.models import ParsedMessage
 from ncat.prompt_runner import PromptRunner
 from tests.mock_agent import MockAgentManager
 

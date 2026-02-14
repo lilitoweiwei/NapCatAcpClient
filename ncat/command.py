@@ -9,7 +9,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from ncat.agent_manager import AgentManager
-from ncat.converter import ParsedMessage
+from ncat.models import ParsedMessage
 
 logger = logging.getLogger("ncat.command")
 

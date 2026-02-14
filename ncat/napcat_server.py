@@ -12,8 +12,9 @@ import websockets
 from websockets.asyncio.server import ServerConnection
 
 from ncat.agent_manager import AgentManager
-from ncat.converter import ContentPart, ai_to_onebot, content_to_onebot
+from ncat.converter import ai_to_onebot, content_to_onebot
 from ncat.dispatcher import MessageDispatcher
+from ncat.models import ContentPart
 from ncat.permission import PermissionBroker
 
 logger = logging.getLogger("ncat.napcat_server")

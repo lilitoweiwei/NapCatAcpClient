@@ -8,7 +8,7 @@ spawning a real ACP agent subprocess.
 import asyncio
 from typing import Any
 
-from ncat.converter import ContentPart
+from ncat.models import ContentPart
 from ncat.permission import PermissionBroker
 
 

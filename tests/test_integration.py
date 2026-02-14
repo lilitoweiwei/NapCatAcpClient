@@ -8,7 +8,7 @@ import websockets
 from acp.schema import ImageContentBlock, TextContentBlock
 
 import ncat.prompt_runner as prompt_runner_module
-from ncat.converter import ContentPart
+from ncat.models import ContentPart
 from ncat.napcat_server import NcatNapCatServer
 from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat

@@ -37,7 +37,7 @@ from acp.schema import (
     WriteTextFileResponse,
 )
 
-from ncat.converter import ContentPart
+from ncat.models import ContentPart
 
 if TYPE_CHECKING:
     from ncat.agent_manager import AgentManager

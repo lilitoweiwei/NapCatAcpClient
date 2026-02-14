@@ -9,9 +9,10 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from ncat.agent_manager import AgentManager
-from ncat.converter import ContentPart, ParsedMessage, build_prompt_blocks
 from ncat.image_utils import download_image
+from ncat.models import ContentPart, ParsedMessage
 from ncat.permission import PermissionBroker
+from ncat.prompt_builder import build_prompt_blocks
 
 logger = logging.getLogger("ncat.prompt_runner")
 

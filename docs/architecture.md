@@ -36,7 +36,9 @@ ncat/
 ├── prompt_runner.py         Prompt lifecycle manager (timeout, send, cancel)
 ├── permission.py            Permission broker (forward ACP requests to QQ users)
 ├── command.py               Command executor (/new, /stop, /help)
-├── converter.py             Message format conversion (OneBot ↔ internal)
+├── models.py               Shared data types (ParsedMessage, ContentPart, …)
+├── converter.py             OneBot ↔ internal format conversion
+├── prompt_builder.py        ACP prompt construction (text + image blocks)
 ├── image_utils.py           Image download + base64 helpers (httpx)
 ├── acp_client.py            ACP protocol callbacks (NcatAcpClient)
 ├── agent_manager.py         ACP agent subprocess manager (AgentManager)
@@ -178,15 +180,28 @@ Bridges ACP permission requests with QQ user interaction:
 - Handles cancellation via ACP `session/cancel`
 - Manages agent process start/stop
 
+### `models.py`
+
+Shared data types used across ncat modules (no logic, no external deps):
+
+- `ImageAttachment`: raw image URL extracted from OneBot segments
+- `ContentPart`: ordered content piece (text or image) for agent responses
+- `ParsedMessage`: structured result of parsing an OneBot message event
+
 ### `converter.py`
 
-Conversion and prompt-building helpers (stateless):
+OneBot ↔ internal format conversion (stateless):
 
 - `onebot_to_internal()`: OneBot v11 event dict → `ParsedMessage` dataclass
-- `build_context_header()`: `ParsedMessage` → context-enriched prompt string
-- `build_prompt_blocks()`: `ParsedMessage` (+ downloads) → ACP prompt blocks (text + optional images)
 - `content_to_onebot()`: `list[ContentPart]` → OneBot message segment array
 - `ai_to_onebot()`: AI response text → OneBot message segment array (text-only convenience wrapper)
+
+### `prompt_builder.py`
+
+ACP prompt construction (stateless, depends on ACP SDK types):
+
+- `build_context_header()`: `ParsedMessage` → context-enriched prompt string
+- `build_prompt_blocks()`: `ParsedMessage` (+ downloads) → ACP prompt blocks (text + optional images)
 
 ### `config.py`
 
@@ -227,12 +242,13 @@ main.py
         └── dispatcher.py    (MessageDispatcher)
               ├── permission.py      (PermissionBroker)
               ├── prompt_runner.py   (PromptRunner)
-              │     ├── permission.py    (PermissionBroker)
-              │     ├── agent_manager.py (AgentManager)
-              │     └── converter.py
+              │     ├── permission.py      (PermissionBroker)
+              │     ├── agent_manager.py   (AgentManager)
+              │     ├── prompt_builder.py
+              │     └── image_utils.py
               ├── command.py         (CommandExecutor)
               │     └── agent_manager.py (AgentManager)
-              └── converter.py
+              └── converter.py       (imports models.py)
 ```
 
 `NcatAcpClient` (inside `acp_client.py`) triggers permission requests that are

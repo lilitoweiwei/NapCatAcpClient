@@ -29,7 +29,7 @@ from acp.schema import (
 )
 
 from ncat.acp_client import NcatAcpClient
-from ncat.converter import ContentPart
+from ncat.models import ContentPart
 
 if TYPE_CHECKING:
     from ncat.permission import PermissionBroker

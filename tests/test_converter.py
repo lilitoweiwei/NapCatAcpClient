@@ -1,15 +1,10 @@
-"""Tests for the message converter module (OneBot <-> internal format)."""
+"""Tests for converter, models, and prompt_builder modules."""
 
 from acp.schema import ImageContentBlock, TextContentBlock
 
-from ncat.converter import (
-    ContentPart,
-    ai_to_onebot,
-    build_context_header,
-    build_prompt_blocks,
-    content_to_onebot,
-    onebot_to_internal,
-)
+from ncat.converter import ai_to_onebot, content_to_onebot, onebot_to_internal
+from ncat.models import ContentPart
+from ncat.prompt_builder import build_context_header, build_prompt_blocks
 
 BOT_ID = 1234567890
 

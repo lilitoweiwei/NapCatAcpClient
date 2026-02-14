@@ -12,7 +12,8 @@ from collections.abc import Awaitable, Callable
 
 from ncat.agent_manager import AgentManager
 from ncat.command import HELP_TEXT, CommandExecutor
-from ncat.converter import ContentPart, onebot_to_internal
+from ncat.converter import onebot_to_internal
+from ncat.models import ContentPart
 from ncat.permission import PermissionBroker
 from ncat.prompt_runner import PromptRunner
 

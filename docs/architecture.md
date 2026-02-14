@@ -41,7 +41,8 @@ ncat/
 ├── prompt_builder.py        ACP prompt construction (text + image blocks)
 ├── image_utils.py           Image download + base64 helpers (httpx)
 ├── acp_client.py            ACP protocol callbacks (NcatAcpClient)
-├── agent_manager.py         ACP agent subprocess manager (AgentManager)
+├── agent_process.py         ACP agent subprocess lifecycle (AgentProcess)
+├── agent_manager.py         ACP session orchestrator (AgentManager)
 └── __init__.py
 ```
 
@@ -168,17 +169,25 @@ Bridges ACP permission requests with QQ user interaction:
   user approval (reverse-looks up `chat_id` from `session_id`)
 - File system / terminal methods: All rejected (`method_not_found`)
 
+### `agent_process.py` — AgentProcess
+
+**AgentProcess** (agent subprocess lifecycle):
+- Resolves and starts the agent executable (with Windows `.cmd`/`.bat` support)
+- Establishes ACP connection over stdin/stdout
+- Initializes ACP protocol handshake (custom init bypassing SDK defaults)
+- Tracks agent prompt capabilities (e.g. whether images are supported)
+- Stops the subprocess and closes the ACP connection
+- Exposes `conn` (the ACP `ClientSideConnection`) for session operations
+
 ### `agent_manager.py` — AgentManager
 
-**AgentManager** (agent subprocess + session lifecycle):
-- Spawns agent subprocess, establishes ACP connection over stdio
-- Initializes ACP protocol handshake
-- Tracks agent prompt capabilities (e.g. whether images are supported in prompts)
+**AgentManager** (session orchestrator):
+- Delegates subprocess lifecycle to `AgentProcess`
 - Maps `chat_id` (QQ chat identifier) → ACP `session_id` (bidirectional)
 - Stores last event per chat for permission reply routing
+- Accumulates agent response content from `session_update` callbacks
 - Sends prompt content blocks and collects accumulated responses as `list[ContentPart]`
 - Handles cancellation via ACP `session/cancel`
-- Manages agent process start/stop
 
 ### `models.py`
 
@@ -236,7 +245,8 @@ chat_id (e.g. "private:12345")  →  ACP session_id (UUID)
 main.py
   ├── config.py
   ├── log.py
-  ├── agent_manager.py       (AgentManager)
+  ├── agent_manager.py       (AgentManager → AgentProcess)
+  │     └── agent_process.py (AgentProcess)
   └── napcat_server.py       (NcatNapCatServer)
         ├── permission.py    (PermissionBroker)
         └── dispatcher.py    (MessageDispatcher)
@@ -254,6 +264,9 @@ main.py
 `NcatAcpClient` (inside `acp_client.py`) triggers permission requests that are
 forwarded via `AgentManager.permission_broker`. `AgentManager` references
 `PermissionBroker` via a TYPE_CHECKING import to avoid circular dependency.
+`AgentProcess` (inside `agent_process.py`) is a pure subprocess/connection
+manager with no business logic — `AgentManager` owns it and delegates
+lifecycle calls to it.
 
 Key design principle: dependencies flow **inward** — transport modules
 (`napcat_server`) know about business logic (`dispatcher`, `prompt_runner`),

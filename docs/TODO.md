@@ -9,9 +9,12 @@
 
 ## Planned
 - [x] Forward permission requests to QQ user for interactive approval
-- [ ] 添加`/send`指令用于将消息原封不动转发给agent，从而能够调用agent自己的slash command
-- [ ] Expose NapCat capabilities as MCP server for agent
+- [x] 添加`/send`指令用于将消息原封不动转发给agent，从而能够调用agent自己的slash command
+- [ ] 重构：将AgentManager独立到一个新文件中
+- [ ] 更新一下`README.md`
 - [ ] Image support
+- [ ] Expose NapCat capabilities as MCP server for agent
+- [ ] AI思考引起的超时反馈机制的改善：现在会分段发送消息了，所以只有当距离上一条AI发送的消息过太久了才会进行超时反馈
 - [ ] Agent process auto-restart on crash
 - [ ] Smarter group filtering (listen to all messages, reply when relevant)
 - [ ] Configurable context header (currently hardcoded)

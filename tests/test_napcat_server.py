@@ -7,7 +7,7 @@ import pytest_asyncio
 import websockets
 
 from ncat.napcat_server import NcatNapCatServer
-from tests.conftest import MockAgentManager
+from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio

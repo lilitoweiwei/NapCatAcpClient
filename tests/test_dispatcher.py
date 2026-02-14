@@ -5,10 +5,11 @@ import contextlib
 
 import pytest
 import pytest_asyncio
+from acp.schema import PermissionOption
 
 from ncat.dispatcher import MessageDispatcher
-from ncat.permission import PermissionBroker
-from tests.conftest import MockAgentManager
+from ncat.permission import PendingPermission, PermissionBroker
+from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio
@@ -171,6 +172,41 @@ async def test_command_unknown(handler_env) -> None:
     assert "/new" in replies.last_text
 
 
+# --- /send forwarding tests ---
+
+
+async def test_send_prefix_forwards_to_agent(handler_env) -> None:
+    """Test that /send forwards text to the agent without triggering ncat commands."""
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "/send /help"), BOT_ID)
+
+    assert replies.last_text == "Mock AI response"
+    assert len(mock_agent.calls) == 1
+    _, prompt = mock_agent.calls[0]
+    assert "/help" in prompt
+
+
+async def test_send_without_payload_shows_help(handler_env) -> None:
+    """Test that bare /send shows help text (usage hint)."""
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "/send"), BOT_ID)
+
+    assert len(mock_agent.calls) == 0
+    assert "/send <text>" in replies.last_text
+
+
+async def test_send_prefix_not_matched_when_no_space(handler_env) -> None:
+    """Test that /sendxxx is treated as an unknown command, not a forwarded message."""
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "/sendxxx"), BOT_ID)
+
+    assert len(mock_agent.calls) == 0
+    assert "/new" in replies.last_text
+
+
 # --- AI response tests ---
 
 
@@ -319,3 +355,77 @@ async def test_no_notification_on_fast_response(handler_env) -> None:
     # Only the AI reply, no notifications
     assert len(replies.replies) == 1
     assert replies.last_text == "Mock AI response"
+
+
+# --- Pending permission interception tests ---
+
+
+async def test_pending_permission_invalid_input_shows_hint(handler_env) -> None:
+    """If permission is pending, non-numeric input should be intercepted and hinted."""
+    handler, mock_agent, replies = handler_env
+    broker = mock_agent.permission_broker
+    assert broker is not None
+
+    chat_id = "private:111"
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    options = [PermissionOption(kind="allow_once", name="Allow once", optionId="o1")]
+    broker._pending[chat_id] = PendingPermission(future=future, options=options, event={})
+
+    await handler.handle_message(_private_event(111, "A", "not a number"), BOT_ID)
+
+    assert "待处理的权限请求" in replies.last_text
+    assert future.done() is False
+    assert len(mock_agent.calls) == 0
+
+    broker.cancel_pending(chat_id)
+
+
+async def test_pending_permission_valid_reply_resolves_without_reply(handler_env) -> None:
+    """If permission is pending, a numeric reply should resolve without extra replies."""
+    handler, mock_agent, replies = handler_env
+    broker = mock_agent.permission_broker
+    assert broker is not None
+
+    chat_id = "private:111"
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    options = [PermissionOption(kind="allow_once", name="Allow once", optionId="o1")]
+    broker._pending[chat_id] = PendingPermission(future=future, options=options, event={})
+
+    before = len(replies.replies)
+    await handler.handle_message(_private_event(111, "A", "1"), BOT_ID)
+    after = len(replies.replies)
+
+    assert after == before
+    assert future.done() is True
+    assert future.result().option_id == "o1"
+    assert len(mock_agent.calls) == 0
+
+    broker.cancel_pending(chat_id)
+
+
+# --- Internal error handling tests ---
+
+
+async def test_internal_exception_sends_error_reply(monkeypatch) -> None:
+    """Unexpected exceptions in handle_message() should send a user-facing error."""
+    import ncat.dispatcher as dispatcher_module
+
+    def _boom(_: dict, __: int):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(dispatcher_module, "onebot_to_internal", _boom)
+
+    mock_agent = MockAgentManager()
+    replies = ReplyCollector()
+    broker = PermissionBroker(reply_fn=replies, timeout=300)
+    mock_agent.permission_broker = broker
+    handler = MessageDispatcher(
+        agent_manager=mock_agent,
+        reply_fn=replies,
+        permission_broker=broker,
+    )
+
+    await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
+    assert replies.last_text == "处理消息时发生内部错误"

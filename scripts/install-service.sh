@@ -70,7 +70,7 @@ fi
 
 cat > "$SERVICE_FILE" <<UNIT
 [Unit]
-Description=ncat — NapCatQQ OpenCode Channel bridge server
+Description=ncat — NapCat ACP Client bridge server
 After=network.target
 
 [Service]
@@ -89,10 +89,10 @@ SyslogIdentifier=ncat
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-# Allow read-write to project data dir and opencode workspace (~/.ncat/)
+# Allow read-write to project data dir and agent workspace (~/.ncat/)
 ReadWritePaths=${PROJECT_DIR}/data ${USER_HOME}/.ncat
 
-# Environment: inherit user's PATH so opencode CLI is discoverable
+# Environment: inherit user's PATH so agent CLI is discoverable
 Environment="PATH=/usr/local/bin:/usr/bin:/bin:${USER_HOME}/.local/bin"
 Environment="HOME=${USER_HOME}"
 

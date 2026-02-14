@@ -1,17 +1,15 @@
-"""AI request lifecycle manager — handles OpenCode calls with timeout and cancellation.
+"""AI request lifecycle manager — handles ACP prompt calls with timeout and cancellation.
 
 Owns the per-chat active task tracking, timeout notification timers,
-session management, prompt building, and OpenCode invocation.
+and ACP agent interaction via AgentManager.
 """
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.converter import ParsedMessage
-from ncat.opencode import SubprocessOpenCodeBackend
-from ncat.prompt import PromptBuilder
-from ncat.session import SessionManager
+from ncat.acp_client import AgentManager
+from ncat.converter import ParsedMessage, build_context_header
 
 logger = logging.getLogger("ncat.ai_processor")
 
@@ -26,8 +24,8 @@ _MSG_THINKING_LONG = "AI 思考时间较长，你可以发送 /stop 中断当前
 
 class AiProcessor:
     """
-    Manages the full AI request lifecycle: session management, prompt building,
-    OpenCode invocation, timeout notifications, and cancellation support.
+    Manages the full AI request lifecycle: prompt building, ACP agent
+    interaction, timeout notifications, and cancellation support.
 
     Exposes is_busy() and cancel() for use by the message handler and command
     executor respectively.
@@ -35,19 +33,13 @@ class AiProcessor:
 
     def __init__(
         self,
-        session_manager: SessionManager,
-        opencode_backend: SubprocessOpenCodeBackend,
-        prompt_builder: PromptBuilder,
+        agent_manager: AgentManager,
         reply_fn: ReplyFn,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
     ) -> None:
-        # Session manager for chat-to-opencode session mapping
-        self._session_manager = session_manager
-        # OpenCode backend for sending prompts and receiving AI responses
-        self._opencode_backend = opencode_backend
-        # Prompt builder for constructing context-enriched prompts
-        self._prompt_builder = prompt_builder
+        # ACP agent manager for sending prompts and cancellation
+        self._agent_manager = agent_manager
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
         # Seconds before sending first "AI is thinking" notification (0 = disabled)
@@ -71,6 +63,8 @@ class AiProcessor:
         task = self._active_tasks.get(chat_id)
         if task is not None and not task.done():
             task.cancel()
+            # Also send ACP cancel notification to the agent
+            asyncio.create_task(self._agent_manager.cancel(chat_id))
             logger.info("AI task cancelled for %s", chat_id)
             return True
         return False
@@ -109,59 +103,51 @@ class AiProcessor:
             )
 
         try:
-            # Get or create session
-            session = await self._session_manager.get_active_session(chat_key)
-            if session is None:
-                session = await self._session_manager.create_session(chat_key)
+            # Build context-enriched prompt text
+            prompt_text = build_context_header(parsed)
 
-            # Build prompt with context (include session_init on first message)
-            is_new_session = session.opencode_session_id is None
-            prompt = self._prompt_builder.build(parsed, is_new_session)
-
-            # Check queue and send queuing notice if needed
-            if self._opencode_backend.is_queue_full():
-                await self._reply_fn(
-                    event, "AI 正在忙，你的请求已排队，请稍候..."
-                )
-
-            # Call OpenCode (this is the long-running part, cancellable by /stop)
-            response = await self._opencode_backend.send_message(
-                session.opencode_session_id, prompt
+            # Send prompt to the ACP agent and wait for complete response
+            response_text = await self._agent_manager.send_prompt(
+                chat_key, prompt_text
             )
 
             # Cancel timers immediately after AI responds to avoid late notifications
             for timer in timers:
                 timer.cancel()
 
-            # Update session with OpenCode session ID if new
-            if session.opencode_session_id is None and response.session_id:
-                await self._session_manager.update_opencode_session_id(
-                    session.id, response.session_id
-                )
-
-            # Send reply based on response status
-            if response.success and response.content:
+            # Send reply based on response
+            if response_text:
                 logger.info(
                     "Sending AI reply to %s (%d chars)",
                     chat_key,
-                    len(response.content),
+                    len(response_text),
                 )
-                await self._reply_fn(event, response.content)
-            elif response.success and not response.content:
-                logger.warning("OpenCode returned empty content for %s", chat_key)
-                await self._reply_fn(event, "AI 未返回有效回复")
+                await self._reply_fn(event, response_text)
             else:
-                logger.error(
-                    "OpenCode failed for %s: %s",
-                    chat_key,
-                    response.error,
-                )
-                await self._reply_fn(event, "AI 处理出错，请稍后重试")
+                logger.warning("Agent returned empty content for %s", chat_key)
+                await self._reply_fn(event, "AI 未返回有效回复")
 
         except asyncio.CancelledError:
             # Cancelled by /stop — notification already sent by the command executor
             logger.info("AI request cancelled for %s (user /stop)", chat_key)
             raise
+
+        except RuntimeError as e:
+            # Agent not running (e.g. crashed)
+            logger.error("Agent error for %s: %s", chat_key, e)
+            await self._reply_fn(
+                event, f"Agent 异常：{e}\n当前会话已关闭，下次对话将自动开启新会话。"
+            )
+            # Close the session for this chat on agent crash
+            await self._agent_manager.close_session(chat_key)
+
+        except Exception as e:
+            logger.error("AI processing error for %s: %s", chat_key, e, exc_info=True)
+            await self._reply_fn(
+                event, f"Agent 异常：{e}\n当前会话已关闭，下次对话将自动开启新会话。"
+            )
+            # Close session on any unexpected error
+            await self._agent_manager.close_session(chat_key)
 
         finally:
             # Ensure all notification timers are cancelled (idempotent)

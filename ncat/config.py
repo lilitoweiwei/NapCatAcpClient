@@ -17,23 +17,25 @@ class ServerConfig:
 
 
 @dataclass
-class OpenCodeConfig:
-    """OpenCode CLI backend configuration."""
+class AgentConfig:
+    """ACP agent subprocess configuration."""
 
-    # Path or name of the opencode executable
-    command: str = "opencode"
-    # Working directory for opencode subprocess (~ is expanded at runtime)
-    work_dir: str = "~/.ncat/workspace"
-    # Max number of concurrent opencode processes (limits resource usage)
-    max_concurrent: int = 1
+    # Path or name of the agent executable (e.g. "claude", "gemini")
+    command: str = "claude"
+    # Arguments to pass to the agent (e.g. ["--experimental-acp"])
+    args: list[str] = field(default_factory=list)
+    # Working directory for the agent process
+    cwd: str = "~/.ncat/workspace"
 
 
 @dataclass
-class DatabaseConfig:
-    """SQLite database configuration."""
+class UxConfig:
+    """User experience configuration for timeout notifications and interaction."""
 
-    # File path for the SQLite database (parent dirs created automatically)
-    path: str = "data/ncat.db"
+    # Seconds before sending first "AI is thinking" notification (0 to disable)
+    thinking_notify_seconds: float = 10
+    # Seconds before sending "AI thinking too long, use /stop" notification (0 to disable)
+    thinking_long_notify_seconds: float = 30
 
 
 @dataclass
@@ -51,37 +53,13 @@ class LoggingConfig:
 
 
 @dataclass
-class PromptConfig:
-    """System prompt file configuration."""
-
-    # Directory for prompt files, relative to opencode work_dir
-    dir: str = "prompts"
-    # Filename for the session-level system prompt (prepended to first message only)
-    session_init_file: str = "session_init.md"
-    # Filename for the per-message prefix prompt (prepended to every message)
-    message_prefix_file: str = "message_prefix.md"
-
-
-@dataclass
-class UxConfig:
-    """User experience configuration for timeout notifications and interaction."""
-
-    # Seconds before sending first "AI is thinking" notification (0 to disable)
-    thinking_notify_seconds: float = 10
-    # Seconds before sending "AI thinking too long, use /stop" notification (0 to disable)
-    thinking_long_notify_seconds: float = 30
-
-
-@dataclass
 class NcatConfig:
     """Top-level ncat configuration, aggregating all sub-configs."""
 
     server: ServerConfig = field(default_factory=ServerConfig)
-    opencode: OpenCodeConfig = field(default_factory=OpenCodeConfig)
-    database: DatabaseConfig = field(default_factory=DatabaseConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
-    prompt: PromptConfig = field(default_factory=PromptConfig)
+    agent: AgentConfig = field(default_factory=AgentConfig)
     ux: UxConfig = field(default_factory=UxConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
 def load_config(path: str | Path = "config.toml") -> NcatConfig:
@@ -100,19 +78,16 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
 
     # Build config from raw dict, using defaults for missing fields
     server = ServerConfig(**raw.get("server", {}))
-    opencode = OpenCodeConfig(**raw.get("opencode", {}))
-    database = DatabaseConfig(**raw.get("database", {}))
-    logging_cfg = LoggingConfig(**raw.get("logging", {}))
-    prompt = PromptConfig(**raw.get("prompt", {}))
+    agent_raw = raw.get("agent", {})
+    agent = AgentConfig(**agent_raw)
     ux = UxConfig(**raw.get("ux", {}))
+    logging_cfg = LoggingConfig(**raw.get("logging", {}))
 
     return NcatConfig(
         server=server,
-        opencode=opencode,
-        database=database,
-        logging=logging_cfg,
-        prompt=prompt,
+        agent=agent,
         ux=ux,
+        logging=logging_cfg,
     )
 
 

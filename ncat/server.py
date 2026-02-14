@@ -8,11 +8,9 @@ import uuid
 import websockets
 from websockets.asyncio.server import ServerConnection
 
+from ncat.acp_client import AgentManager
 from ncat.converter import ai_to_onebot
 from ncat.handler import MessageHandler
-from ncat.opencode import SubprocessOpenCodeBackend
-from ncat.prompt import PromptBuilder
-from ncat.session import SessionManager
 
 logger = logging.getLogger("ncat.server")
 
@@ -29,15 +27,15 @@ class NcatServer:
         self,
         host: str,
         port: int,
-        session_manager: SessionManager,
-        opencode_backend: SubprocessOpenCodeBackend,
-        prompt_builder: PromptBuilder,
+        agent_manager: AgentManager,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
     ) -> None:
         # WebSocket bind address and port
         self._host = host
         self._port = port
+        # ACP agent manager (needed for session cleanup on disconnect)
+        self._agent_manager = agent_manager
 
         # Currently active WebSocket connection from NapCatQQ (only one expected)
         self._connection: ServerConnection | None = None
@@ -50,9 +48,7 @@ class NcatServer:
 
         # Message handler — business logic, decoupled from transport
         self._handler = MessageHandler(
-            session_manager=session_manager,
-            opencode_backend=opencode_backend,
-            prompt_builder=prompt_builder,
+            agent_manager=agent_manager,
             reply_fn=self._reply_text,
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
@@ -97,6 +93,9 @@ class NcatServer:
             logger.warning("Connection closed: code=%s reason=%s", e.code, e.reason)
         finally:
             self._connection = None
+            # Close all ACP sessions when NapCat disconnects
+            logger.info("NapCat disconnected, closing all ACP sessions")
+            await self._agent_manager.close_all_sessions()
             logger.info("Connection handler exited")
 
     async def _dispatch_event(self, event: dict) -> None:

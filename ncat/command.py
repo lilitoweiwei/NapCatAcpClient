@@ -8,8 +8,8 @@ whether the message was handled as a command (True) or not (False).
 import logging
 from collections.abc import Awaitable, Callable
 
+from ncat.acp_client import AgentManager
 from ncat.converter import ParsedMessage
-from ncat.session import SessionManager
 
 logger = logging.getLogger("ncat.command")
 
@@ -67,12 +67,12 @@ class CommandExecutor:
 
     def __init__(
         self,
-        session_manager: SessionManager,
+        agent_manager: AgentManager,
         reply_fn: ReplyFn,
         cancel_fn: CancelFn,
     ) -> None:
-        # Session manager for /new command (archive + create session)
-        self._session_manager = session_manager
+        # Agent manager for /new command (close + recreate session)
+        self._agent_manager = agent_manager
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
         # Callback to cancel an active AI task (bridges to AiProcessor.cancel)
@@ -97,11 +97,10 @@ class CommandExecutor:
     ) -> None:
         """Execute a parsed command (internal dispatch)."""
         if command == "new":
-            # Archive current session and create a new one
-            await self._session_manager.archive_active_session(parsed.chat_id)
-            await self._session_manager.create_session(parsed.chat_id)
+            # Close current ACP session; a new one will be created on next message
+            await self._agent_manager.close_session(parsed.chat_id)
             await self._reply_fn(event, _MSG_NEW_SESSION)
-            logger.info("New session created for %s", parsed.chat_id)
+            logger.info("New session will be created for %s on next message", parsed.chat_id)
 
         elif command == "stop":
             # Cancel the active AI task for this chat via callback

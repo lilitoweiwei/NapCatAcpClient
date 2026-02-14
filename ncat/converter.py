@@ -88,6 +88,23 @@ def onebot_to_internal(event: dict, bot_id: int) -> ParsedMessage:
     )
 
 
+def build_context_header(parsed: ParsedMessage) -> str:
+    """Build a context header with sender/group info for the ACP prompt.
+
+    Prepended to the user's message text so the agent knows who is speaking
+    and from which chat context (private vs group).
+    """
+    if parsed.message_type == "private":
+        header = f"[Private chat, user {parsed.sender_name}({parsed.sender_id})]"
+    else:
+        group_id = parsed.chat_id.split(":")[1]
+        header = (
+            f"[Group chat {parsed.group_name}({group_id}), "
+            f"user {parsed.sender_name}({parsed.sender_id})]"
+        )
+    return f"{header}\n{parsed.text}"
+
+
 def ai_to_onebot(text: str) -> list[dict]:
     """
     Convert AI response text to OneBot 11 message segment array.

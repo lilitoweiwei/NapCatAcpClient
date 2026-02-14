@@ -7,27 +7,13 @@ host = "0.0.0.0"
 # Port that NapCatQQ connects to (must match NapCatQQ's reverse WS config).
 port = 8282
 
-[opencode]
-# Path or name of the opencode executable.
-command = "opencode"
-# Working directory for opencode subprocess. Tilde (~) is expanded at runtime.
-work_dir = "~/.ncat/workspace"
-# Maximum number of concurrent opencode processes.
-max_concurrent = 1
-
-[database]
-# SQLite database file path. Parent directories are created automatically. (relative to project root)
-path = "data/ncat.db"
-
-[prompt]
-# Directory for prompt template files, relative to opencode work_dir.
-# e.g. with work_dir = "~/.ncat/workspace", dir = "prompts"
-#      → actual path is ~/.ncat/workspace/prompts/
-dir = "prompts"
-# Filename for the session-level system prompt (prepended to first message only).
-session_init_file = "session_init.md"
-# Filename for the per-message prefix prompt (prepended to every message).
-message_prefix_file = "message_prefix.md"
+[agent]
+# Path or name of the ACP agent executable.
+command = "claude"
+# Arguments to pass to the agent (e.g. ["--experimental-acp"] for gemini).
+args = []
+# Working directory for the agent process. Tilde (~) is expanded at runtime.
+cwd = "~/.ncat/workspace"
 
 [ux]
 # Seconds before sending "AI is thinking" notification (0 to disable).

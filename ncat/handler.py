@@ -9,12 +9,10 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
+from ncat.acp_client import AgentManager
 from ncat.ai_processor import AiProcessor
 from ncat.command import CommandExecutor
 from ncat.converter import onebot_to_internal
-from ncat.opencode import SubprocessOpenCodeBackend
-from ncat.prompt import PromptBuilder
-from ncat.session import SessionManager
 
 logger = logging.getLogger("ncat.handler")
 
@@ -35,9 +33,7 @@ class MessageHandler:
 
     def __init__(
         self,
-        session_manager: SessionManager,
-        opencode_backend: SubprocessOpenCodeBackend,
-        prompt_builder: PromptBuilder,
+        agent_manager: AgentManager,
         reply_fn: ReplyFn,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
@@ -47,9 +43,7 @@ class MessageHandler:
 
         # AI request lifecycle manager (owns active task tracking)
         self._ai = AiProcessor(
-            session_manager=session_manager,
-            opencode_backend=opencode_backend,
-            prompt_builder=prompt_builder,
+            agent_manager=agent_manager,
             reply_fn=reply_fn,
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
@@ -57,7 +51,7 @@ class MessageHandler:
 
         # Command executor (cancel_fn bridges to AiProcessor without direct import)
         self._cmd = CommandExecutor(
-            session_manager=session_manager,
+            agent_manager=agent_manager,
             reply_fn=reply_fn,
             cancel_fn=self._ai.cancel,
         )

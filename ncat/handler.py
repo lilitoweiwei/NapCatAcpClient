@@ -1,7 +1,7 @@
 """Message processing pipeline — thin orchestrator that routes messages.
 
 Routes incoming QQ message events to either the CommandExecutor (for /commands)
-or the AiProcessor (for AI requests). Handles filtering and busy rejection.
+or the PromptRunner (for AI requests). Handles filtering and busy rejection.
 """
 
 import asyncio
@@ -10,9 +10,9 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from ncat.acp_client import AgentManager
-from ncat.ai_processor import AiProcessor
 from ncat.command import CommandExecutor
 from ncat.converter import onebot_to_internal
+from ncat.prompt_runner import PromptRunner
 
 logger = logging.getLogger("ncat.handler")
 
@@ -26,7 +26,7 @@ _MSG_BUSY = "AI 正在思考中，请等待或使用 /stop 中断。"
 
 class MessageHandler:
     """
-    Thin orchestrator: parse → filter → route to CommandExecutor or AiProcessor.
+    Thin orchestrator: parse → filter → route to CommandExecutor or PromptRunner.
 
     Decoupled from WebSocket transport: sends replies via the reply_fn callback.
     """
@@ -41,15 +41,15 @@ class MessageHandler:
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
 
-        # AI request lifecycle manager (owns active task tracking)
-        self._ai = AiProcessor(
+        # Prompt lifecycle manager (owns active task tracking)
+        self._ai = PromptRunner(
             agent_manager=agent_manager,
             reply_fn=reply_fn,
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
         )
 
-        # Command executor (cancel_fn bridges to AiProcessor without direct import)
+        # Command executor (cancel_fn bridges to PromptRunner without direct import)
         self._cmd = CommandExecutor(
             agent_manager=agent_manager,
             reply_fn=reply_fn,

@@ -74,7 +74,7 @@ class MockAgentManager:
         pass
 
     def is_busy(self, chat_id: str) -> bool:
-        # Busy tracking is done by AiProcessor, not AgentManager
+        # Busy tracking is done by PromptRunner, not AgentManager
         return False
 
     async def send_prompt(self, chat_id: str, text: str) -> str:

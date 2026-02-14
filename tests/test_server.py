@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 import websockets
 
-from ncat.server import NcatServer
+from ncat.napcat_server import NcatNapCatServer
 from tests.conftest import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
@@ -15,9 +15,9 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture
 async def server_and_mock():
-    """Start a NcatServer on a random port and yield (server, mock_client, mock_agent)."""
+    """Start a NcatNapCatServer on a random port and yield (server, mock_client, mock_agent)."""
     mock_agent = MockAgentManager()
-    server = NcatServer(
+    server = NcatNapCatServer(
         host="127.0.0.1",
         port=0,  # OS assigns a free port
         agent_manager=mock_agent,

@@ -7,7 +7,7 @@ from pathlib import Path
 from ncat.acp_client import AgentManager
 from ncat.config import get_config_path, load_config
 from ncat.log import setup_logging
-from ncat.server import NcatServer
+from ncat.napcat_server import NcatNapCatServer
 
 logger = logging.getLogger("ncat.main")
 
@@ -37,7 +37,7 @@ async def main() -> None:
     logger.info("ACP agent started")
 
     # Start WebSocket server for NapCatQQ
-    server = NcatServer(
+    server = NcatNapCatServer(
         host=config.server.host,
         port=config.server.port,
         agent_manager=agent_manager,

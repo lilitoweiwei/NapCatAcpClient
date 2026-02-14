@@ -1,4 +1,4 @@
-"""AI request lifecycle manager — handles ACP prompt calls with timeout and cancellation.
+"""Prompt lifecycle manager — handles ACP prompt calls with timeout and cancellation.
 
 Owns the per-chat active task tracking, timeout notification timers,
 and ACP agent interaction via AgentManager.
@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from ncat.acp_client import AgentManager
 from ncat.converter import ParsedMessage, build_context_header
 
-logger = logging.getLogger("ncat.ai_processor")
+logger = logging.getLogger("ncat.prompt_runner")
 
 # Type alias for the reply callback provided by the transport layer.
 # Signature: async reply_fn(event: dict, text: str) -> None
@@ -22,7 +22,7 @@ _MSG_THINKING = "消息已收到，AI 正在思考中，请稍候..."
 _MSG_THINKING_LONG = "AI 思考时间较长，你可以发送 /stop 中断当前思考。"
 
 
-class AiProcessor:
+class PromptRunner:
     """
     Manages the full AI request lifecycle: prompt building, ACP agent
     interaction, timeout notifications, and cancellation support.

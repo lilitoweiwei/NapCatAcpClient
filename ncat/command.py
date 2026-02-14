@@ -17,7 +17,7 @@ logger = logging.getLogger("ncat.command")
 # Signature: async reply_fn(event: dict, text: str) -> None
 ReplyFn = Callable[[dict, str], Awaitable[None]]
 
-# Type alias for the cancel callback provided by AiProcessor.
+# Type alias for the cancel callback provided by PromptRunner.
 # Signature: cancel_fn(chat_id: str) -> bool (True if cancelled, False if no active task)
 CancelFn = Callable[[str], bool]
 
@@ -62,7 +62,7 @@ class CommandExecutor:
     message is a command and executes it if so. Callers only see a bool.
     Dependencies are injected via constructor to keep this module decoupled
     from the AI processing layer — /stop uses a cancel_fn callback rather
-    than a direct reference to AiProcessor.
+    than a direct reference to PromptRunner.
     """
 
     def __init__(
@@ -75,7 +75,7 @@ class CommandExecutor:
         self._agent_manager = agent_manager
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
-        # Callback to cancel an active AI task (bridges to AiProcessor.cancel)
+        # Callback to cancel an active AI task (bridges to PromptRunner.cancel)
         self._cancel_fn = cancel_fn
 
     async def try_handle(self, parsed: ParsedMessage, event: dict) -> bool:

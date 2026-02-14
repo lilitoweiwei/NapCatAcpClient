@@ -1,4 +1,7 @@
-"""WebSocket transport layer for communicating with NapCatQQ via OneBot 11."""
+"""NapCat-facing WebSocket server.
+
+Transport layer for communicating with NapCatQQ via OneBot 11.
+"""
 
 import asyncio
 import json
@@ -12,10 +15,10 @@ from ncat.acp_client import AgentManager
 from ncat.converter import ai_to_onebot
 from ncat.handler import MessageHandler
 
-logger = logging.getLogger("ncat.server")
+logger = logging.getLogger("ncat.napcat_server")
 
 
-class NcatServer:
+class NcatNapCatServer:
     """
     WebSocket server that handles the NapCatQQ transport layer.
 

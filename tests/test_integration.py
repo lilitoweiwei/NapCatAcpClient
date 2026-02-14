@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 import websockets
 
-from ncat.server import NcatServer
+from ncat.napcat_server import NcatNapCatServer
 from tests.conftest import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
@@ -18,7 +18,7 @@ async def full_stack():
     """Set up the full ncat stack with mock NapCat and mock agent."""
     mock_agent = MockAgentManager()
     mock_agent.response_text = "Integration AI response"
-    server = NcatServer(
+    server = NcatNapCatServer(
         host="127.0.0.1",
         port=0,
         agent_manager=mock_agent,

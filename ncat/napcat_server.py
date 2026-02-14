@@ -11,7 +11,7 @@ import uuid
 import websockets
 from websockets.asyncio.server import ServerConnection
 
-from ncat.acp_client import AgentManager
+from ncat.agent_manager import AgentManager
 from ncat.converter import ai_to_onebot
 from ncat.dispatcher import MessageDispatcher
 from ncat.permission import PermissionBroker

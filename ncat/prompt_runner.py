@@ -8,7 +8,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.acp_client import AgentManager
+from ncat.agent_manager import AgentManager
 from ncat.converter import ParsedMessage, build_context_header
 from ncat.permission import PermissionBroker
 

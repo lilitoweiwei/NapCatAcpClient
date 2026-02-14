@@ -10,7 +10,7 @@
 ## Planned
 - [x] Forward permission requests to QQ user for interactive approval
 - [x] 添加`/send`指令用于将消息原封不动转发给agent，从而能够调用agent自己的slash command
-- [ ] 重构：将AgentManager独立到一个新文件中
+- [x] 重构：将AgentManager独立到一个新文件中
 - [ ] 更新一下`README.md`
 - [ ] Image support
 - [ ] Expose NapCat capabilities as MCP server for agent

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from ncat.acp_client import AgentManager
+from ncat.agent_manager import AgentManager
 from ncat.config import get_config_path, load_config
 from ncat.log import setup_logging
 from ncat.napcat_server import NcatNapCatServer

@@ -8,7 +8,7 @@ whether the message was handled as a command (True) or not (False).
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.acp_client import AgentManager
+from ncat.agent_manager import AgentManager
 from ncat.converter import ParsedMessage
 
 logger = logging.getLogger("ncat.command")

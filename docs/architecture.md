@@ -37,7 +37,8 @@ ncat/
 ├── permission.py            Permission broker (forward ACP requests to QQ users)
 ├── command.py               Command executor (/new, /stop, /help)
 ├── converter.py             Message format conversion (OneBot ↔ internal)
-├── acp_client.py            ACP protocol callbacks + agent subprocess manager
+├── acp_client.py            ACP protocol callbacks (NcatAcpClient)
+├── agent_manager.py         ACP agent subprocess manager (AgentManager)
 └── __init__.py
 ```
 
@@ -154,15 +155,15 @@ Bridges ACP permission requests with QQ user interaction:
 - **Session cleanup**: `clear_session()` removes cached decisions when a
   session is closed.
 
-### `acp_client.py` — NcatAcpClient + AgentManager
-
-Contains two classes with distinct responsibilities:
+### `acp_client.py` — NcatAcpClient
 
 **NcatAcpClient** (ACP protocol callbacks):
 - `session_update`: Accumulates `AgentMessageChunk` text into `AgentManager`
 - `request_permission`: Delegates to `PermissionBroker` for interactive
   user approval (reverse-looks up `chat_id` from `session_id`)
 - File system / terminal methods: All rejected (`method_not_found`)
+
+### `agent_manager.py` — AgentManager
 
 **AgentManager** (agent subprocess + session lifecycle):
 - Spawns agent subprocess, establishes ACP connection over stdio
@@ -213,23 +214,23 @@ chat_id (e.g. "private:12345")  →  ACP session_id (UUID)
 main.py
   ├── config.py
   ├── log.py
-  ├── acp_client.py          (AgentManager)
+  ├── agent_manager.py       (AgentManager)
   └── napcat_server.py       (NcatNapCatServer)
         ├── permission.py    (PermissionBroker)
         └── dispatcher.py    (MessageDispatcher)
               ├── permission.py      (PermissionBroker)
               ├── prompt_runner.py   (PromptRunner)
               │     ├── permission.py    (PermissionBroker)
-              │     ├── acp_client.py    (AgentManager)
+              │     ├── agent_manager.py (AgentManager)
               │     └── converter.py
               ├── command.py         (CommandExecutor)
-              │     └── acp_client.py    (AgentManager)
+              │     └── agent_manager.py (AgentManager)
               └── converter.py
 ```
 
-`NcatAcpClient` (inside `acp_client.py`) references `PermissionBroker` via
-the `AgentManager.permission_broker` property (TYPE_CHECKING import to
-avoid circular dependency).
+`NcatAcpClient` (inside `acp_client.py`) triggers permission requests that are
+forwarded via `AgentManager.permission_broker`. `AgentManager` references
+`PermissionBroker` via a TYPE_CHECKING import to avoid circular dependency.
 
 Key design principle: dependencies flow **inward** — transport modules
 (`napcat_server`) know about business logic (`dispatcher`, `prompt_runner`),

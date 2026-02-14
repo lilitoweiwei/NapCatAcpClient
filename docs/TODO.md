@@ -1,8 +1,17 @@
-* [x] system prompt
-* [x] 接受到消息后（AI完成处理前）就立即通知用户，避免用户觉得消息没有被收到
-* [ ] 增加指令用于检查服务器状态
-* [ ] 怎么让AI在保持人格的情况下保持聪明
-* [ ] 群聊环境下增加一种更加智能的过滤机制，主动监听所有消息，如果有关的话就主动回复
-* [ ] 增加记忆机制
-* [ ] 构造mcp server来让ai能主动调用一些qq的功能
-* [ ] 支持图片
+# ncat TODO
+
+## Done
+- [x] Rename project to ncat (NapCat ACP Client)
+- [x] Replace OpenCode backend with ACP protocol
+- [x] Remove SQLite session persistence (in-memory only)
+- [x] System prompt (now handled by agent)
+- [x] Immediate notification after receiving a message (before AI finishes)
+
+## Planned
+- [ ] Forward permission requests to QQ user for interactive approval
+- [ ] Expose NapCat capabilities as MCP server for agent
+- [ ] Image support
+- [ ] Agent process auto-restart on crash
+- [ ] Smarter group filtering (listen to all messages, reply when relevant)
+- [ ] Memory mechanism
+- [ ] Configurable context header (currently hardcoded)

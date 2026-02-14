@@ -1,6 +1,6 @@
 """Tests for the message converter module (OneBot <-> internal format)."""
 
-from ncat.converter import ai_to_onebot, onebot_to_internal
+from ncat.converter import ai_to_onebot, build_context_header, onebot_to_internal
 
 BOT_ID = 1234567890
 
@@ -146,3 +146,41 @@ def test_sender_name_fallback_to_nickname() -> None:
 def test_ai_to_onebot() -> None:
     result = ai_to_onebot("Hello world")
     assert result == [{"type": "text", "data": {"text": "Hello world"}}]
+
+
+# --- build_context_header tests ---
+
+
+def test_context_header_private() -> None:
+    """Test context header for private messages."""
+    event = {
+        "self_id": BOT_ID,
+        "user_id": 111,
+        "message_type": "private",
+        "sender": {"user_id": 111, "nickname": "Alice", "card": ""},
+        "message": [{"type": "text", "data": {"text": "hello"}}],
+        "post_type": "message",
+    }
+    parsed = onebot_to_internal(event, BOT_ID)
+    header = build_context_header(parsed)
+    assert "[Private chat, user Alice(111)]" in header
+    assert "hello" in header
+
+
+def test_context_header_group() -> None:
+    """Test context header for group messages."""
+    event = {
+        "self_id": BOT_ID,
+        "user_id": 333,
+        "message_type": "group",
+        "group_id": 999,
+        "group_name": "TestGroup",
+        "sender": {"user_id": 333, "nickname": "Bob", "card": ""},
+        "message": [{"type": "text", "data": {"text": "hi"}}],
+        "post_type": "message",
+    }
+    parsed = onebot_to_internal(event, BOT_ID)
+    header = build_context_header(parsed)
+    assert "[Group chat TestGroup(999)" in header
+    assert "user Bob(333)]" in header
+    assert "hi" in header

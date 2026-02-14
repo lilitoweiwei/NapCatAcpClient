@@ -112,14 +112,14 @@ class NcatAcpClient(Client):
             if opt.kind == "allow_once":
                 logger.info("Auto-approving tool call (allow_once): %s", opt.name)
                 return RequestPermissionResponse(
-                    outcome=AllowedOutcome(outcome="selected", optionId=opt.option_id)
+                    outcome=AllowedOutcome(outcome="selected", option_id=opt.option_id)
                 )
 
         # Fallback: select the first option regardless of kind
         first = options[0]
         logger.info("Auto-approving tool call (fallback to first option): %s", first.name)
         return RequestPermissionResponse(
-            outcome=AllowedOutcome(outcome="selected", optionId=first.option_id)
+            outcome=AllowedOutcome(outcome="selected", option_id=first.option_id)
         )
 
     # --- Unsupported capabilities (fs, terminal) ---
@@ -130,15 +130,24 @@ class NcatAcpClient(Client):
         raise RequestError.method_not_found("fs/write_text_file")
 
     async def read_text_file(
-        self, path: str, session_id: str, limit: int | None = None,
-        line: int | None = None, **kwargs: Any
+        self,
+        path: str,
+        session_id: str,
+        limit: int | None = None,
+        line: int | None = None,
+        **kwargs: Any,
     ) -> ReadTextFileResponse:
         raise RequestError.method_not_found("fs/read_text_file")
 
     async def create_terminal(
-        self, command: str, session_id: str, args: list[str] | None = None,
-        cwd: str | None = None, env: list[EnvVariable] | None = None,
-        output_byte_limit: int | None = None, **kwargs: Any,
+        self,
+        command: str,
+        session_id: str,
+        args: list[str] | None = None,
+        cwd: str | None = None,
+        env: list[EnvVariable] | None = None,
+        output_byte_limit: int | None = None,
+        **kwargs: Any,
     ) -> CreateTerminalResponse:
         raise RequestError.method_not_found("terminal/create")
 
@@ -167,6 +176,10 @@ class NcatAcpClient(Client):
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         raise RequestError.method_not_found(method)
+
+    def on_connect(self, conn: Any) -> None:
+        """Called when the ACP connection is established (no-op for ncat)."""
+        return None
 
 
 class AgentManager:
@@ -208,14 +221,17 @@ class AgentManager:
         """Start the agent subprocess and initialize the ACP connection."""
         logger.info(
             "Starting agent: %s %s (cwd: %s)",
-            self._command, " ".join(self._args), self._cwd,
+            self._command,
+            " ".join(self._args),
+            self._cwd,
         )
 
         self._client = NcatAcpClient(self)
 
         # Spawn the agent subprocess
         self._process = await asyncio.create_subprocess_exec(
-            self._command, *self._args,
+            self._command,
+            *self._args,
             stdin=aio_subprocess.PIPE,
             stdout=aio_subprocess.PIPE,
             cwd=self._cwd,
@@ -226,7 +242,9 @@ class AgentManager:
 
         # Establish ACP connection over stdin/stdout
         self._conn = connect_to_agent(
-            self._client, self._process.stdin, self._process.stdout,
+            self._client,
+            self._process.stdin,
+            self._process.stdout,
         )
 
         # Initialize the ACP protocol
@@ -234,7 +252,9 @@ class AgentManager:
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=ClientCapabilities(),
             client_info=Implementation(
-                name="ncat", title="NapCat ACP Client", version="0.2.0",
+                name="ncat",
+                title="NapCat ACP Client",
+                version="0.2.0",
             ),
         )
 
@@ -363,7 +383,10 @@ class AgentManager:
 
             logger.info(
                 "Prompt completed for %s (session %s): stop_reason=%s, %d chars",
-                chat_id, session_id, response.stop_reason, len(result),
+                chat_id,
+                session_id,
+                response.stop_reason,
+                len(result),
             )
             return result
 

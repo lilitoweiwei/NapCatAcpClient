@@ -64,7 +64,8 @@ class AiProcessor:
         if task is not None and not task.done():
             task.cancel()
             # Also send ACP cancel notification to the agent
-            asyncio.create_task(self._agent_manager.cancel(chat_id))
+            cancel_task = asyncio.create_task(self._agent_manager.cancel(chat_id))
+            cancel_task.add_done_callback(lambda t: t.result() if not t.cancelled() else None)
             logger.info("AI task cancelled for %s", chat_id)
             return True
         return False
@@ -88,9 +89,7 @@ class AiProcessor:
         if self._thinking_notify_seconds > 0:
             timers.append(
                 asyncio.create_task(
-                    self._send_after_delay(
-                        event, self._thinking_notify_seconds, _MSG_THINKING
-                    )
+                    self._send_after_delay(event, self._thinking_notify_seconds, _MSG_THINKING)
                 )
             )
         if self._thinking_long_notify_seconds > 0:
@@ -107,9 +106,7 @@ class AiProcessor:
             prompt_text = build_context_header(parsed)
 
             # Send prompt to the ACP agent and wait for complete response
-            response_text = await self._agent_manager.send_prompt(
-                chat_key, prompt_text
-            )
+            response_text = await self._agent_manager.send_prompt(chat_key, prompt_text)
 
             # Cancel timers immediately after AI responds to avoid late notifications
             for timer in timers:
@@ -157,9 +154,7 @@ class AiProcessor:
             if self._active_tasks.get(chat_key) is current_task:
                 del self._active_tasks[chat_key]
 
-    async def _send_after_delay(
-        self, event: dict, delay: float, message: str
-    ) -> None:
+    async def _send_after_delay(self, event: dict, delay: float, message: str) -> None:
         """Send a notification message after a delay (used for timeout notifications)."""
         await asyncio.sleep(delay)
         logger.info("Sending timeout notification: %s", message[:50])

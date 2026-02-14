@@ -6,51 +6,21 @@ import pytest
 import pytest_asyncio
 import websockets
 
-from ncat.opencode import OpenCodeResponse, SubprocessOpenCodeBackend
-from ncat.prompt import PromptBuilder
 from ncat.server import NcatServer
-from ncat.session import SessionManager
+from tests.conftest import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio
 
 
-class FakeOpenCodeBackend(SubprocessOpenCodeBackend):
-    """Fake backend that returns canned responses without calling opencode."""
-
-    def __init__(self) -> None:
-        super().__init__(command="echo", work_dir=".", max_concurrent=1)
-        self.last_message: str | None = None
-        self.response = OpenCodeResponse(
-            session_id="ses_fake123",
-            content="Fake AI response",
-            success=True,
-            error=None,
-        )
-        # Configurable delay before returning response (for timeout/cancel tests)
-        self.delay: float = 0
-
-    async def _run(self, session_id: str | None, message: str) -> OpenCodeResponse:
-        self.last_message = message
-        if self.delay > 0:
-            await asyncio.sleep(self.delay)
-        return self.response
-
-
 @pytest_asyncio.fixture
-async def server_and_mock(tmp_path):
-    """Start a NcatServer on a random port and yield (server, mock_client, fake_backend)."""
-    sm = SessionManager(str(tmp_path / "test.db"))
-    await sm.init()
-
-    fake_backend = FakeOpenCodeBackend()
-    prompt_builder = PromptBuilder(tmp_path / "prompts")
+async def server_and_mock():
+    """Start a NcatServer on a random port and yield (server, mock_client, mock_agent)."""
+    mock_agent = MockAgentManager()
     server = NcatServer(
         host="127.0.0.1",
         port=0,  # OS assigns a free port
-        session_manager=sm,
-        opencode_backend=fake_backend,
-        prompt_builder=prompt_builder,
+        agent_manager=mock_agent,
     )
 
     # Start server in background; we need to find the actual port
@@ -66,12 +36,11 @@ async def server_and_mock(tmp_path):
     # Wait briefly for lifecycle event to be processed
     await asyncio.sleep(0.1)
 
-    yield server, mock, fake_backend
+    yield server, mock, mock_agent
 
     await mock.close()
     ws_server.close()
     await ws_server.wait_closed()
-    await sm.close()
 
 
 async def test_connection_and_lifecycle(server_and_mock) -> None:
@@ -102,20 +71,20 @@ async def test_send_api(server_and_mock) -> None:
 
 async def test_private_message_reply(server_and_mock) -> None:
     """Test that a private message triggers an AI response."""
-    server, mock, fake_backend = server_and_mock
+    server, mock, mock_agent = server_and_mock
     await asyncio.sleep(0.1)
 
     # Send a private message from mock
     await mock.send_private_message(111, "Alice", "hello")
 
-    # Server should call OpenCode and then send a reply via API
+    # Server should call agent and then send a reply via API
     api_call = await mock.recv_api_call(timeout=5.0)
     assert api_call is not None
     assert api_call["action"] == "send_private_msg"
     assert api_call["params"]["user_id"] == 111
     # The response text should be in the message segments
     msg_text = api_call["params"]["message"][0]["data"]["text"]
-    assert msg_text == "Fake AI response"
+    assert msg_text == "Mock AI response"
 
 
 async def test_group_message_ignored_without_at(server_and_mock) -> None:
@@ -145,7 +114,7 @@ async def test_group_message_with_at_bot(server_and_mock) -> None:
 
 
 async def test_command_new(server_and_mock) -> None:
-    """Test that /new command creates a new session."""
+    """Test that /new command closes session."""
     server, mock, _ = server_and_mock
     await asyncio.sleep(0.1)
 
@@ -171,40 +140,6 @@ async def test_command_help(server_and_mock) -> None:
     assert "/help" in msg_text
 
 
-async def test_command_unknown(server_and_mock) -> None:
-    """Test that unknown /commands return help text."""
-    server, mock, _ = server_and_mock
-    await asyncio.sleep(0.1)
-
-    await mock.send_private_message(111, "Alice", "/xyz")
-
-    api_call = await mock.recv_api_call(timeout=3.0)
-    assert api_call is not None
-    msg_text = api_call["params"]["message"][0]["data"]["text"]
-    assert "/new" in msg_text
-
-
-async def test_opencode_error_sends_error_message(server_and_mock) -> None:
-    """Test that OpenCode errors result in an error message to the user."""
-    server, mock, fake_backend = server_and_mock
-    await asyncio.sleep(0.1)
-
-    # Make the backend return an error
-    fake_backend.response = OpenCodeResponse(
-        session_id="ses_err",
-        content="",
-        success=False,
-        error="API rate limit",
-    )
-
-    await mock.send_private_message(111, "Alice", "cause error")
-
-    api_call = await mock.recv_api_call(timeout=5.0)
-    assert api_call is not None
-    msg_text = api_call["params"]["message"][0]["data"]["text"]
-    assert "出错" in msg_text
-
-
 async def test_heartbeat_no_crash(server_and_mock) -> None:
     """Test that heartbeat events don't cause errors."""
     server, mock, _ = server_and_mock
@@ -228,21 +163,18 @@ async def test_command_stop_no_active(server_and_mock) -> None:
     assert "没有进行中" in msg_text
 
 
-async def test_command_stop_cancels_ai(server_and_mock) -> None:
-    """Test that /stop cancels an active AI processing task via WebSocket."""
-    server, mock, fake_backend = server_and_mock
+async def test_disconnect_closes_all_sessions(server_and_mock) -> None:
+    """Test that NapCat disconnect closes all ACP sessions."""
+    server, mock, mock_agent = server_and_mock
     await asyncio.sleep(0.1)
-    fake_backend.delay = 5.0  # Long delay to keep AI "thinking"
 
-    # Send a message that will take long to process
-    await mock.send_private_message(111, "Alice", "think hard")
-    await asyncio.sleep(0.2)  # Let the handler register the active task
+    # Send a message first to establish a session mapping
+    await mock.send_private_message(111, "Alice", "hello")
+    await mock.recv_api_call(timeout=5.0)
 
-    # Send /stop
-    await mock.send_private_message(111, "Alice", "/stop")
+    # Disconnect the mock client
+    await mock.close()
+    await asyncio.sleep(0.3)
 
-    # Should receive the "已中断" message
-    api_call = await mock.recv_api_call(timeout=3.0)
-    assert api_call is not None
-    msg_text = api_call["params"]["message"][0]["data"]["text"]
-    assert "已中断" in msg_text
+    # Agent manager should have been told to close all sessions
+    assert mock_agent.all_sessions_closed

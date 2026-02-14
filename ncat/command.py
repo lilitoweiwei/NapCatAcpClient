@@ -92,9 +92,7 @@ class CommandExecutor:
         await self._execute(command, parsed, event)
         return True
 
-    async def _execute(
-        self, command: str, parsed: ParsedMessage, event: dict
-    ) -> None:
+    async def _execute(self, command: str, parsed: ParsedMessage, event: dict) -> None:
         """Execute a parsed command (internal dispatch)."""
         if command == "new":
             # Close current ACP session; a new one will be created on next message

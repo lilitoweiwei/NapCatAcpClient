@@ -13,8 +13,8 @@ def test_load_valid_config(tmp_config: Path) -> None:
     assert isinstance(config, NcatConfig)
     assert config.server.host == "127.0.0.1"
     assert config.server.port == 0
-    assert config.opencode.command == "echo"
-    assert config.opencode.max_concurrent == 1
+    assert config.agent.command == "echo"
+    assert config.agent.args == []
     assert config.logging.level == "DEBUG"
     assert config.logging.keep_days == 7
 
@@ -34,8 +34,7 @@ def test_load_partial_config(tmp_path: Path) -> None:
     # Specified value should be loaded
     assert config.server.port == 9999
     # Missing sections should use defaults
-    assert config.opencode.command == "opencode"
-    assert config.database.path == "data/ncat.db"
+    assert config.agent.command == "claude"
     assert config.logging.level == "INFO"
 
 
@@ -47,4 +46,18 @@ def test_load_empty_config(tmp_path: Path) -> None:
     config = load_config(config_file)
     assert config.server.host == "0.0.0.0"
     assert config.server.port == 8080
-    assert config.opencode.max_concurrent == 1
+    assert config.agent.command == "claude"
+    assert config.ux.thinking_notify_seconds == 10
+
+
+def test_load_agent_config_with_args(tmp_path: Path) -> None:
+    """Test loading agent config with args list."""
+    config_file = tmp_path / "agent.toml"
+    config_file.write_text(
+        '[agent]\ncommand = "gemini"\nargs = ["--experimental-acp"]\ncwd = "/tmp/workspace"\n'
+    )
+
+    config = load_config(config_file)
+    assert config.agent.command == "gemini"
+    assert config.agent.args == ["--experimental-acp"]
+    assert config.agent.cwd == "/tmp/workspace"

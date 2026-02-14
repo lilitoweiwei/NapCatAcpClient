@@ -6,10 +6,10 @@ import pytest
 import pytest_asyncio
 import websockets
 
-from nochan.opencode import OpenCodeResponse, SubprocessOpenCodeBackend
-from nochan.prompt import PromptBuilder
-from nochan.server import NochanServer
-from nochan.session import SessionManager
+from ncat.opencode import OpenCodeResponse, SubprocessOpenCodeBackend
+from ncat.prompt import PromptBuilder
+from ncat.server import NcatServer
+from ncat.session import SessionManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio
@@ -39,13 +39,13 @@ class FakeOpenCodeBackend(SubprocessOpenCodeBackend):
 
 @pytest_asyncio.fixture
 async def full_stack(tmp_path):
-    """Set up the full nochan stack with mock NapCat and fake OpenCode."""
+    """Set up the full ncat stack with mock NapCat and fake OpenCode."""
     sm = SessionManager(str(tmp_path / "integ.db"))
     await sm.init()
 
     fake_backend = FakeOpenCodeBackend()
     prompt_builder = PromptBuilder(tmp_path / "prompts")
-    server = NochanServer(
+    server = NcatServer(
         host="127.0.0.1",
         port=0,
         session_manager=sm,

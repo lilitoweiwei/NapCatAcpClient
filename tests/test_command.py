@@ -1,6 +1,6 @@
 """Tests for the command parser module."""
 
-from nochan.command import parse_command
+from ncat.command import parse_command
 
 
 def test_parse_command_new() -> None:

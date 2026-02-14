@@ -8,12 +8,12 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from nochan.converter import ParsedMessage
-from nochan.opencode import SubprocessOpenCodeBackend
-from nochan.prompt import PromptBuilder
-from nochan.session import SessionManager
+from ncat.converter import ParsedMessage
+from ncat.opencode import SubprocessOpenCodeBackend
+from ncat.prompt import PromptBuilder
+from ncat.session import SessionManager
 
-logger = logging.getLogger("nochan.ai_processor")
+logger = logging.getLogger("ncat.ai_processor")
 
 # Type alias for the reply callback provided by the transport layer.
 # Signature: async reply_fn(event: dict, text: str) -> None

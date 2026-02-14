@@ -6,10 +6,10 @@ import contextlib
 import pytest
 import pytest_asyncio
 
-from nochan.handler import MessageHandler
-from nochan.opencode import OpenCodeResponse, SubprocessOpenCodeBackend
-from nochan.prompt import PromptBuilder
-from nochan.session import SessionManager
+from ncat.handler import MessageHandler
+from ncat.opencode import OpenCodeResponse, SubprocessOpenCodeBackend
+from ncat.prompt import PromptBuilder
+from ncat.session import SessionManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio

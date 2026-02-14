@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from nochan.converter import onebot_to_internal
-from nochan.prompt import PromptBuilder
+from ncat.converter import onebot_to_internal
+from ncat.prompt import PromptBuilder
 
 BOT_ID = 1234567890
 

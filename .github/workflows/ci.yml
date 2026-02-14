@@ -23,13 +23,13 @@ jobs:
         run: uv sync
 
       - name: Lint (ruff check)
-        run: uv run ruff check nochan/ tests/ main.py
+        run: uv run ruff check ncat/ tests/ main.py
 
       - name: Format (ruff format)
-        run: uv run ruff format --check nochan/ tests/ main.py
+        run: uv run ruff format --check ncat/ tests/ main.py
 
       - name: Type check (mypy)
-        run: uv run mypy nochan/ main.py
+        run: uv run mypy ncat/ main.py
 
       - name: Test (pytest)
         run: uv run pytest tests/ -v

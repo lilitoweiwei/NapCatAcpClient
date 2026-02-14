@@ -1,1 +1,1 @@
-sudo systemctl status nochan
+sudo systemctl status ncat

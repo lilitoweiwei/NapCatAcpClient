@@ -20,7 +20,7 @@ class MockNapCat:
         self._received: list[dict] = []
 
     async def connect(self) -> None:
-        """Connect to the nochan server and send lifecycle event."""
+        """Connect to the ncat server and send lifecycle event."""
         self._ws = await websockets.connect(self._url)
         # Send lifecycle connect event (what real NapCatQQ does)
         await self._send_event(

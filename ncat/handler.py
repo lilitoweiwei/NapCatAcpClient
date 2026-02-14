@@ -9,14 +9,14 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
-from nochan.ai_processor import AiProcessor
-from nochan.command import CommandExecutor
-from nochan.converter import onebot_to_internal
-from nochan.opencode import SubprocessOpenCodeBackend
-from nochan.prompt import PromptBuilder
-from nochan.session import SessionManager
+from ncat.ai_processor import AiProcessor
+from ncat.command import CommandExecutor
+from ncat.converter import onebot_to_internal
+from ncat.opencode import SubprocessOpenCodeBackend
+from ncat.prompt import PromptBuilder
+from ncat.session import SessionManager
 
-logger = logging.getLogger("nochan.handler")
+logger = logging.getLogger("ncat.handler")
 
 # Type alias for the reply callback provided by the transport layer.
 # Signature: async reply_fn(event: dict, text: str) -> None

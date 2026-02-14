@@ -7,14 +7,14 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-logger = logging.getLogger("nochan.session")
+logger = logging.getLogger("ncat.session")
 
 
 @dataclass
 class Session:
-    """Represents a nochan session linking a QQ chat to an OpenCode session."""
+    """Represents a ncat session linking a QQ chat to an OpenCode session."""
 
-    # Internal session UUID (nochan-generated)
+    # Internal session UUID (ncat-generated)
     id: str
     # Chat identifier: "private:<user_id>" or "group:<group_id>"
     chat_id: str

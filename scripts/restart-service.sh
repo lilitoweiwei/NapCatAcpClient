@@ -1,1 +1,1 @@
-sudo systemctl restart nochan
+sudo systemctl restart ncat

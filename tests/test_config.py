@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from nochan.config import NochanConfig, load_config
+from ncat.config import NcatConfig, load_config
 
 
 def test_load_valid_config(tmp_config: Path) -> None:
     """Test loading a valid TOML config file."""
     config = load_config(tmp_config)
-    assert isinstance(config, NochanConfig)
+    assert isinstance(config, NcatConfig)
     assert config.server.host == "127.0.0.1"
     assert config.server.port == 0
     assert config.opencode.command == "echo"
@@ -35,7 +35,7 @@ def test_load_partial_config(tmp_path: Path) -> None:
     assert config.server.port == 9999
     # Missing sections should use defaults
     assert config.opencode.command == "opencode"
-    assert config.database.path == "data/nochan.db"
+    assert config.database.path == "data/ncat.db"
     assert config.logging.level == "INFO"
 
 

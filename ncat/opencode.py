@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-logger = logging.getLogger("nochan.opencode")
+logger = logging.getLogger("ncat.opencode")
 
 
 @dataclass

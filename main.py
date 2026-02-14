@@ -1,17 +1,17 @@
-"""nochan entry point - starts the WebSocket server."""
+"""ncat entry point - starts the WebSocket server."""
 
 import asyncio
 import logging
 from pathlib import Path
 
-from nochan.config import get_config_path, load_config
-from nochan.log import setup_logging
-from nochan.opencode import SubprocessOpenCodeBackend
-from nochan.prompt import PromptBuilder
-from nochan.server import NochanServer
-from nochan.session import SessionManager
+from ncat.config import get_config_path, load_config
+from ncat.log import setup_logging
+from ncat.opencode import SubprocessOpenCodeBackend
+from ncat.prompt import PromptBuilder
+from ncat.server import NcatServer
+from ncat.session import SessionManager
 
-logger = logging.getLogger("nochan.main")
+logger = logging.getLogger("ncat.main")
 
 
 async def main() -> None:
@@ -22,7 +22,7 @@ async def main() -> None:
 
     # Initialize logging
     setup_logging(config.logging)
-    logger.info("nochan starting up (config: %s)", config_path)
+    logger.info("ncat starting up (config: %s)", config_path)
 
     # Ensure opencode work directory exists
     work_dir = Path(config.opencode.work_dir).expanduser()
@@ -56,7 +56,7 @@ async def main() -> None:
     )
 
     # Start WebSocket server
-    server = NochanServer(
+    server = NcatServer(
         host=config.server.host,
         port=config.server.port,
         session_manager=session_manager,
@@ -70,7 +70,7 @@ async def main() -> None:
         await server.start()
     finally:
         await session_manager.close()
-        logger.info("nochan shut down.")
+        logger.info("ncat shut down.")
 
 
 if __name__ == "__main__":

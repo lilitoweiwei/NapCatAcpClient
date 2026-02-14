@@ -8,16 +8,16 @@ import uuid
 import websockets
 from websockets.asyncio.server import ServerConnection
 
-from nochan.converter import ai_to_onebot
-from nochan.handler import MessageHandler
-from nochan.opencode import SubprocessOpenCodeBackend
-from nochan.prompt import PromptBuilder
-from nochan.session import SessionManager
+from ncat.converter import ai_to_onebot
+from ncat.handler import MessageHandler
+from ncat.opencode import SubprocessOpenCodeBackend
+from ncat.prompt import PromptBuilder
+from ncat.session import SessionManager
 
-logger = logging.getLogger("nochan.server")
+logger = logging.getLogger("ncat.server")
 
 
-class NochanServer:
+class NcatServer:
     """
     WebSocket server that handles the NapCatQQ transport layer.
 
@@ -60,7 +60,7 @@ class NochanServer:
 
     async def start(self) -> None:
         """Start the WebSocket server and run forever."""
-        logger.info("Starting nochan server on ws://%s:%d", self._host, self._port)
+        logger.info("Starting ncat server on ws://%s:%d", self._host, self._port)
         # Use None for host to bind all interfaces (IPv4 + IPv6)
         host = None if self._host == "0.0.0.0" else self._host
         async with websockets.serve(self._handler_ws, host, self._port):

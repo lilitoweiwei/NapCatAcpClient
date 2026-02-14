@@ -8,10 +8,10 @@ whether the message was handled as a command (True) or not (False).
 import logging
 from collections.abc import Awaitable, Callable
 
-from nochan.converter import ParsedMessage
-from nochan.session import SessionManager
+from ncat.converter import ParsedMessage
+from ncat.session import SessionManager
 
-logger = logging.getLogger("nochan.command")
+logger = logging.getLogger("ncat.command")
 
 # Type alias for the reply callback provided by the transport layer.
 # Signature: async reply_fn(event: dict, text: str) -> None
@@ -23,7 +23,7 @@ CancelFn = Callable[[str], bool]
 
 # Help text template shown for /help and unknown commands
 HELP_TEXT = (
-    "nochan 指令列表：\n"
+    "ncat 指令列表：\n"
     "/new  - 创建新会话（清空 AI 上下文）\n"
     "/stop - 中断当前 AI 思考\n"
     "/help - 显示本帮助信息\n"

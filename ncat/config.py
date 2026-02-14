@@ -1,4 +1,4 @@
-"""Configuration loading from TOML file."""
+"""Configuration loading from TOML file for ncat."""
 
 import sys
 import tomllib
@@ -23,7 +23,7 @@ class OpenCodeConfig:
     # Path or name of the opencode executable
     command: str = "opencode"
     # Working directory for opencode subprocess (~ is expanded at runtime)
-    work_dir: str = "~/.nochan/workspace"
+    work_dir: str = "~/.ncat/workspace"
     # Max number of concurrent opencode processes (limits resource usage)
     max_concurrent: int = 1
 
@@ -33,7 +33,7 @@ class DatabaseConfig:
     """SQLite database configuration."""
 
     # File path for the SQLite database (parent dirs created automatically)
-    path: str = "data/nochan.db"
+    path: str = "data/ncat.db"
 
 
 @dataclass
@@ -73,8 +73,8 @@ class UxConfig:
 
 
 @dataclass
-class NochanConfig:
-    """Top-level nochan configuration, aggregating all sub-configs."""
+class NcatConfig:
+    """Top-level ncat configuration, aggregating all sub-configs."""
 
     server: ServerConfig = field(default_factory=ServerConfig)
     opencode: OpenCodeConfig = field(default_factory=OpenCodeConfig)
@@ -84,7 +84,7 @@ class NochanConfig:
     ux: UxConfig = field(default_factory=UxConfig)
 
 
-def load_config(path: str | Path = "config.toml") -> NochanConfig:
+def load_config(path: str | Path = "config.toml") -> NcatConfig:
     """
     Load configuration from a TOML file.
 
@@ -106,7 +106,7 @@ def load_config(path: str | Path = "config.toml") -> NochanConfig:
     prompt = PromptConfig(**raw.get("prompt", {}))
     ux = UxConfig(**raw.get("ux", {}))
 
-    return NochanConfig(
+    return NcatConfig(
         server=server,
         opencode=opencode,
         database=database,

@@ -1,20 +1,20 @@
-"""Logging initialization for nochan."""
+"""Logging initialization for ncat."""
 
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
-from nochan.config import LoggingConfig
+from ncat.config import LoggingConfig
 
 
 def _cleanup_old_logs(log_dir: Path, max_total_bytes: int) -> None:
     """
     Delete oldest log files when total size exceeds the limit.
 
-    Scans all nochan.log* files, sorts by modification time (oldest first),
+    Scans all ncat.log* files, sorts by modification time (oldest first),
     and removes files until total size is within the budget.
     """
-    log_files = sorted(log_dir.glob("nochan.log*"), key=lambda f: f.stat().st_mtime)
+    log_files = sorted(log_dir.glob("ncat.log*"), key=lambda f: f.stat().st_mtime)
     total = sum(f.stat().st_size for f in log_files)
 
     while total > max_total_bytes and len(log_files) > 1:
@@ -39,8 +39,8 @@ def setup_logging(config: LoggingConfig) -> None:
     max_total_bytes = config.max_total_mb * 1024 * 1024
     _cleanup_old_logs(log_dir, max_total_bytes)
 
-    # Configure root nochan logger (set to DEBUG so file handler can capture everything)
-    logger = logging.getLogger("nochan")
+    # Configure root ncat logger (set to DEBUG so file handler can capture everything)
+    logger = logging.getLogger("ncat")
     logger.setLevel(logging.DEBUG)
 
     # Log format: [2026-02-13 10:30:00] [INFO] [module] message
@@ -56,7 +56,7 @@ def setup_logging(config: LoggingConfig) -> None:
     logger.addHandler(console_handler)
 
     # File handler — always DEBUG for full diagnostics
-    log_file = log_dir / "nochan.log"
+    log_file = log_dir / "ncat.log"
     file_handler = TimedRotatingFileHandler(
         log_file,
         when="midnight",

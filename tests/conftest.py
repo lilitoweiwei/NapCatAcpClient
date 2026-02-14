@@ -1,11 +1,11 @@
-"""Shared pytest fixtures for nochan tests."""
+"""Shared pytest fixtures for ncat tests."""
 
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
-from nochan.session import SessionManager
+from ncat.session import SessionManager
 
 
 @pytest.fixture

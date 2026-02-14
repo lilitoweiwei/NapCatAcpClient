@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# install-service.sh — Install nochan as a systemd service for auto-start on boot.
+# install-service.sh — Install ncat as a systemd service for auto-start on boot.
 #
 # Usage:
 #   sudo bash scripts/install-service.sh [OPTIONS]
 #
 # Options (all optional, sensible defaults provided):
 #   --user USER          Linux user to run the service as (default: current user)
-#   --project-dir DIR    Absolute path to the nochan project root (default: script's parent dir)
+#   --project-dir DIR    Absolute path to the ncat project root (default: script's parent dir)
 #   --uv-path PATH       Absolute path to the uv binary (default: auto-detect via `which uv`)
 #
 # Examples:
 #   sudo bash scripts/install-service.sh
-#   sudo bash scripts/install-service.sh --user admin --project-dir /home/admin/nochan
+#   sudo bash scripts/install-service.sh --user admin --project-dir /home/admin/ncat
 
 set -euo pipefail
 
@@ -43,10 +43,10 @@ fi
 # Resolve the service user's home directory
 USER_HOME=$(eval echo "~$SERVICE_USER")
 
-SERVICE_NAME="nochan"
+SERVICE_NAME="ncat"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-echo "=== nochan service installer ==="
+echo "=== ncat service installer ==="
 echo "  User:        $SERVICE_USER"
 echo "  Home:        $USER_HOME"
 echo "  Project dir: $PROJECT_DIR"
@@ -57,7 +57,7 @@ echo ""
 # ── Validate ─────────────────────────────────────────────────────────────────
 
 if [[ ! -f "$PROJECT_DIR/main.py" ]]; then
-    echo "ERROR: main.py not found in $PROJECT_DIR — is this the nochan project root?"
+    echo "ERROR: main.py not found in $PROJECT_DIR — is this the ncat project root?"
     exit 1
 fi
 
@@ -70,7 +70,7 @@ fi
 
 cat > "$SERVICE_FILE" <<UNIT
 [Unit]
-Description=nochan — NapCatQQ OpenCode Channel bridge server
+Description=ncat — NapCatQQ OpenCode Channel bridge server
 After=network.target
 
 [Service]
@@ -84,13 +84,13 @@ RestartSec=5
 # Logging: stdout/stderr go to journalctl
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=nochan
+SyslogIdentifier=ncat
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-# Allow read-write to project data dir and opencode workspace (~/.nochan/)
-ReadWritePaths=${PROJECT_DIR}/data ${USER_HOME}/.nochan
+# Allow read-write to project data dir and opencode workspace (~/.ncat/)
+ReadWritePaths=${PROJECT_DIR}/data ${USER_HOME}/.ncat
 
 # Environment: inherit user's PATH so opencode CLI is discoverable
 Environment="PATH=/usr/local/bin:/usr/bin:/bin:${USER_HOME}/.local/bin"
@@ -110,18 +110,18 @@ systemctl enable "$SERVICE_NAME"
 echo ""
 echo "=== Done! ==="
 echo ""
-echo "The nochan service is now installed and enabled for auto-start on boot."
+echo "The ncat service is now installed and enabled for auto-start on boot."
 echo ""
 echo "Useful commands:"
-echo "  sudo systemctl start nochan          # Start now"
-echo "  sudo systemctl stop nochan           # Stop"
-echo "  sudo systemctl restart nochan        # Restart"
-echo "  sudo systemctl status nochan         # Check status"
-echo "  journalctl -u nochan -f              # Follow live logs"
-echo "  journalctl -u nochan --since today   # Today's logs"
+echo "  sudo systemctl start ncat          # Start now"
+echo "  sudo systemctl stop ncat           # Stop"
+echo "  sudo systemctl restart ncat        # Restart"
+echo "  sudo systemctl status ncat         # Check status"
+echo "  journalctl -u ncat -f              # Follow live logs"
+echo "  journalctl -u ncat --since today   # Today's logs"
 echo ""
 echo "To uninstall:"
-echo "  sudo systemctl stop nochan"
-echo "  sudo systemctl disable nochan"
+echo "  sudo systemctl stop ncat"
+echo "  sudo systemctl disable ncat"
 echo "  sudo rm $SERVICE_FILE"
 echo "  sudo systemctl daemon-reload"

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from nochan.opencode import OpenCodeResponse, SubprocessOpenCodeBackend, parse_jsonl_events
+from ncat.opencode import OpenCodeResponse, SubprocessOpenCodeBackend, parse_jsonl_events
 
 # --- parse_jsonl_events unit tests ---
 

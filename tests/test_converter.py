@@ -1,6 +1,6 @@
 """Tests for the message converter module (OneBot <-> internal format)."""
 
-from nochan.converter import ai_to_onebot, onebot_to_internal
+from ncat.converter import ai_to_onebot, onebot_to_internal
 
 BOT_ID = 1234567890
 

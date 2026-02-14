@@ -7,9 +7,9 @@ hot-reload without restarting the server.
 import logging
 from pathlib import Path
 
-from nochan.converter import ParsedMessage
+from ncat.converter import ParsedMessage
 
-logger = logging.getLogger("nochan.prompt")
+logger = logging.getLogger("ncat.prompt")
 
 
 class PromptBuilder:

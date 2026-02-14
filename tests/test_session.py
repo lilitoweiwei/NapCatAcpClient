@@ -2,7 +2,7 @@
 
 import pytest
 
-from nochan.session import SessionManager
+from ncat.session import SessionManager
 
 pytestmark = pytest.mark.asyncio
 

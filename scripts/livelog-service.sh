@@ -1,1 +1,1 @@
-journalctl -u nochan -f
+journalctl -u ncat -f

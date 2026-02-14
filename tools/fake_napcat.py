@@ -287,6 +287,21 @@ async def interactive_loop(
                 else:
                     print_error("Usage: /mode private|group")
 
+            elif cmd == "/send":
+                # Send raw text to ncat without triggering local commands.
+                # Useful for testing ncat-side commands like /help, /new, /stop.
+                text = line[len("/send") :].strip()
+                if not text:
+                    print_error("Usage: /send <text>")
+                elif state.mode == "private":
+                    event = build_private_message(state, text)
+                    await ws.send(json.dumps(event))
+                    print_info(f"Sent raw private message: {text}")
+                else:
+                    event = build_group_message(state, text)
+                    await ws.send(json.dumps(event))
+                    print_info(f"Sent raw group message to {state.group_id}: {text}")
+
             elif cmd == "/status":
                 # Show current state
                 print_colored(
@@ -321,6 +336,7 @@ def print_help(state: FakeNapCatState) -> None:
         f"  Mode:    {state.mode}\n"
         "\nCommands:\n"
         "  <text>              Send message (in current mode)\n"
+        "  /send <text>        Send raw text (bypass local commands, e.g. /send /help)\n"
         "  /group <text>       Send as group message with @bot\n"
         "  /setuser <id> <name>    Change user identity\n"
         "  /setgroup <id> <name>   Change default group\n"

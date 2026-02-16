@@ -1,134 +1,42 @@
 # ncat (NapCat ACP Client)
 
-A Python bridge that connects [NapCatQQ](https://github.com/NapNeko/NapCatQQ) to any [ACP](https://agentclientprotocol.com/)-compatible AI agent — chat with an AI coding assistant through QQ.
+一个 Python 桥接器，将 [NapCatQQ](https://github.com/NapNeko/NapCatQQ) 连接到任何支持 [ACP](https://agentclientprotocol.com/) 的 AI 智能体 —— 让你通过 QQ 与 AI 编程助手聊天。
 
-## How It Works
+## 工作原理
 
-ncat acts as an **ACP client**: it launches an ACP-compatible agent as a subprocess, communicates via the Agent Client Protocol over stdin/stdout, and bridges user messages from QQ (via NapCatQQ) to the agent.
+ncat 作为一个 **ACP 客户端**：它以子进程方式启动兼容 ACP 的智能体，通过标准输入/输出 (stdin/stdout) 进行 ACP 协议通信，并将来自 QQ（通过 NapCatQQ）的用户消息桥接到智能体。
 
 ```
-QQ User → NapCat (reverse WS) → ncat → ACP Agent (stdin/stdout)
-QQ User ← NapCat (reverse WS) ← ncat ← ACP Agent (stdin/stdout)
+QQ 用户 → NapCat (反向 WS) → ncat → ACP 智能体 (stdin/stdout)
+QQ 用户 ← NapCat (反向 WS) ← ncat ← ACP 智能体 (stdin/stdout)
 ```
 
-Supported content:
+## 快速启动
 
-- **Text**: forwarded as ACP text blocks
-- **Images**:
-  - **NapCat → agent**: OneBot image segments are downloaded and forwarded as ACP image blocks when the agent advertises `promptCapabilities.image`
-  - **agent → NapCat**: ACP image outputs are forwarded back to QQ as OneBot image segments (`base64://...`)
-  - **Fallback**: if the agent does not support images, or the image download fails, ncat forwards `[图片]` / `[图片 url=...]` as plain text
-
-## Prerequisites
-
-- NapCatQQ configured in **reverse WebSocket** (OneBot v11) mode
-- An **ACP-compatible agent** executable (configured via `agent.command` / `agent.args` / `agent.env`)
-- Python **3.12+** and `uv`
-
-## Quick Start
-
-### Linux / macOS
+### 安装与运行
 
 ```bash
-# Install dependencies (requires uv and Python 3.12+)
+# 安装依赖
 uv sync
 
-# Create your config from the template
+# 从模板创建配置
 cp config.example.toml config.toml
-# Edit config.toml as needed (especially [agent] section), then start
+
+# 编辑 config.toml 后启动
 uv run python main.py
 ```
 
-### Windows (PowerShell)
+然后配置 NapCatQQ 连接到 ncat 的 WebSocket 服务器（默认：`ws://127.0.0.1:8282`）。
 
-```powershell
-# Install dependencies (requires uv and Python 3.12+)
-uv sync
+## 部署为系统服务 (Systemd)
 
-# Create your config from the template
-Copy-Item config.example.toml config.toml
-
-# Edit config.toml as needed (especially [agent] section), then start
-uv run python main.py
-```
-
-Then configure NapCatQQ to connect to ncat's WebSocket server (default: `ws://127.0.0.1:8282`).
-
-## Configuration
-
-Copy `config.example.toml` to `config.toml` and customize. Key settings:
-
-- `server.host` / `server.port` — WebSocket bind address + port for NapCatQQ to connect to
-- `agent.command` / `agent.args` / `agent.cwd` / `agent.env` — ACP agent subprocess command line, working directory, and environment variables (e.g. API keys, proxy)
-- `ux.thinking_notify_seconds` / `ux.thinking_long_notify_seconds` — "AI is thinking" notifications
-- `ux.permission_timeout` / `ux.permission_raw_input_max_len` — permission prompt behavior
-- `ux.image_download_timeout` — timeout (seconds) for downloading images from NapCat-provided URLs
-- `logging.level` — Console log level (log file always captures DEBUG)
-- `logging.dir` / `logging.keep_days` / `logging.max_total_mb` — log retention and disk cap
-
-By default, ncat loads `config.toml` from the current working directory. You can pass a config path:
-
-```bash
-uv run python main.py path/to/config.toml
-```
-
-## QQ Commands
-
-| Command | Description |
-|---------|-------------|
-| `/new`  | Start a new AI session (clears context) |
-| `/stop` | Cancel the current AI thinking |
-| `/send <text>` | Forward text to the agent verbatim (bypass ncat command parsing) |
-| `/help` | Show available commands |
-
-Tip: use `/send /help` to invoke the agent's own `/help` without colliding with ncat commands.
-
-In group chats, the bot must be @-mentioned to respond.
-
-## Permission Requests
-
-Some agents request permission before executing an operation/tool call. ncat will send a numbered
-list of options; reply with `1`, `2`, ... to select. `/stop` also cancels a pending permission prompt.
-
-## Deploy as System Service
-
-To run ncat as a systemd service with auto-start on boot (Linux):
+在 Linux 上，你可以将 ncat 部署为自动随系统启动的服务：
 
 ```bash
 sudo bash scripts/install-service.sh
 ```
 
-Options: `--user USER`, `--project-dir DIR`, `--uv-path PATH` (all auto-detected by default).
-
-Note: the systemd unit runs `uv run python main.py` in the project directory, so it loads
-`config.toml` from the project root by default.
-
-After installation:
-
-```bash
-sudo systemctl start ncat          # Start now
-sudo systemctl status ncat         # Check status
-journalctl -u ncat -f              # Follow live logs
-```
-
-## Development
-
-Run the following commands to ensure code quality (same as CI):
-
-```bash
-# Lint
-uv run ruff check ncat/ tests/ main.py
-
-# Format
-uv run ruff format ncat/ tests/ main.py
-
-# Type check
-uv run mypy ncat/ main.py
-
-# Test
-uv run pytest tests/ -v
-```
-
-## License
-
-MIT. See `LICENSE`.
+安装后：
+- 启动服务: `sudo systemctl start ncat`
+- 查看状态: `sudo systemctl status ncat`
+- 实时日志: `journalctl -u ncat -f`

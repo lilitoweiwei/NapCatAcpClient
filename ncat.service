@@ -1,0 +1,15 @@
+[Unit]
+Description=NapCat Bridge (ncat)
+After=fag.service
+Requires=fag.service
+
+[Service]
+Type=simple
+User=supplient
+WorkingDirectory=/home/supplient/suzu/ncat
+ExecStart=/home/supplient/.local/bin/uv run python main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

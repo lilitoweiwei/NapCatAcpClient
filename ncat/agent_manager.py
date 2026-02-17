@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from ncat.acp_client import NcatAcpClient
 from ncat.agent_process import AgentProcess, PromptBlock
+from ncat.config import McpServerConfig
 from ncat.models import ContentPart
 
 if TYPE_CHECKING:
@@ -40,6 +41,7 @@ class AgentManager:
         args: list[str],
         cwd: str,
         env: dict[str, str] | None = None,
+        mcp_servers: list[McpServerConfig] | None = None,
     ) -> None:
         # Agent subprocess and ACP connection manager
         self._process = AgentProcess(
@@ -48,6 +50,8 @@ class AgentManager:
             cwd=cwd,
             env=env,
         )
+
+        self._mcp_servers = mcp_servers or []
 
         # Chat-to-session mapping: chat_id -> ACP session_id
         self._sessions: dict[str, str] = {}
@@ -133,9 +137,45 @@ class AgentManager:
         conn = self._process.conn
         assert conn is not None, "Agent not started"
 
+        # Convert config objects to ACP-compatible dicts
+        mcp_servers_payload = []
+        for server in self._mcp_servers:
+            if server.transport == "sse":
+                if not server.url:
+                    logger.warning("MCP server %s (sse) missing URL, skipping", server.name)
+                    continue
+                item = {
+                    "type": "sse",
+                    "name": server.name,
+                    "url": server.url,
+                    "headers": [],  # Required field
+                }
+                mcp_servers_payload.append(item)
+            elif server.transport == "stdio":
+                if not server.command:
+                    logger.warning("MCP server %s (stdio) missing command, skipping", server.name)
+                    continue
+                item = {
+                    "name": server.name,
+                    "command": server.command,
+                    "args": server.args or [],
+                    "env": [
+                        {"name": k, "value": v} for k, v in (server.env or {}).items()
+                    ],
+                }
+                mcp_servers_payload.append(item)
+
+        if mcp_servers_payload:
+            logger.info(
+                "Configuring session with MCP servers: %s",
+                [s.get("name") for s in mcp_servers_payload],
+            )
+        else:
+            logger.info("No MCP servers configured for this session")
+
         session = await conn.new_session(
             cwd=self._process.cwd,
-            mcp_servers=[],
+            mcp_servers=mcp_servers_payload,
         )
         session_id = session.session_id
         self._sessions[chat_id] = session_id

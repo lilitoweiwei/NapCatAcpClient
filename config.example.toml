@@ -22,6 +22,17 @@ cwd = "~/.ncat/workspace"
 # ANTHROPIC_API_KEY = "your-api-key-here"
 # HTTPS_PROXY = "http://127.0.0.1:7890"
 
+# [[mcp]]
+# name = "napcat"
+# transport = "sse"
+# url = "http://localhost:8937/sse"
+
+# [[mcp]]
+# name = "filesystem"
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/files"]
+
 [ux]
 # Seconds before sending "AI is thinking" notification (0 to disable).
 thinking_notify_seconds = 10

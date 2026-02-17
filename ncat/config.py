@@ -31,6 +31,24 @@ class AgentConfig:
 
 
 @dataclass
+class McpServerConfig:
+    """MCP server configuration."""
+
+    # Unique name for this MCP server
+    name: str
+    # Transport type: "stdio" or "sse"
+    transport: str = "stdio"
+    # [stdio] Command to run
+    command: str | None = None
+    # [stdio] Arguments for the command
+    args: list[str] = field(default_factory=list)
+    # [stdio] Environment variables
+    env: dict[str, str] = field(default_factory=dict)
+    # [sse] URL to connect to
+    url: str | None = None
+
+
+@dataclass
 class UxConfig:
     """User experience configuration for timeout notifications and interaction."""
 
@@ -66,6 +84,7 @@ class NcatConfig:
 
     server: ServerConfig = field(default_factory=ServerConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    mcp: list[McpServerConfig] = field(default_factory=list)
     ux: UxConfig = field(default_factory=UxConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -88,12 +107,17 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
     server = ServerConfig(**raw.get("server", {}))
     agent_raw = raw.get("agent", {})
     agent = AgentConfig(**agent_raw)
+    
+    mcp_raw = raw.get("mcp", [])
+    mcp = [McpServerConfig(**item) for item in mcp_raw]
+    
     ux = UxConfig(**raw.get("ux", {}))
     logging_cfg = LoggingConfig(**raw.get("logging", {}))
 
     return NcatConfig(
         server=server,
         agent=agent,
+        mcp=mcp,
         ux=ux,
         logging=logging_cfg,
     )

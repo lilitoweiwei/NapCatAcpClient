@@ -22,10 +22,18 @@ cwd = "~/.ncat/workspace"
 # ANTHROPIC_API_KEY = "your-api-key-here"
 # HTTPS_PROXY = "http://127.0.0.1:7890"
 
+# NapCat MCP (SSE, when running as a separate service)
 # [[mcp]]
-# name = "napcat"
+# name = "napcat_mcp"
 # transport = "sse"
 # url = "http://localhost:8937/sse"
+
+# NapCat MCP (STDIO, when Agent and MCP run in same container; requires FAG allow_stdio = true)
+# [[mcp]]
+# name = "napcat_mcp"
+# transport = "stdio"
+# command = "uv"
+# args = ["run", "--project", "/app/NapCatMCP", "python", "-m", "src.napcat_mcp.main", "--transport", "stdio"]
 
 # [[mcp]]
 # name = "filesystem"

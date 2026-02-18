@@ -37,6 +37,8 @@ class MockAgentManager:
         self.all_sessions_closed: bool = False
         # Whether send_prompt should raise RuntimeError (simulates agent crash)
         self.should_crash: bool = False
+        # Whether agent is connected (False simulates "agent not connected")
+        self._is_running: bool = True
         # Permission broker (set externally, mirrors real AgentManager)
         self._permission_broker: PermissionBroker | None = None
         # Last event per chat (for permission reply routing)
@@ -46,7 +48,7 @@ class MockAgentManager:
 
     @property
     def is_running(self) -> bool:
-        return True
+        return self._is_running
 
     @property
     def supports_image(self) -> bool:

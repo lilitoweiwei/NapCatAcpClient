@@ -9,6 +9,7 @@ by `ncat.acp_client.NcatAcpClient`.
 """
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
     from ncat.permission import PermissionBroker
 
 logger = logging.getLogger("ncat.agent_manager")
+
+# Reply text when agent is not connected (used by dispatcher, command, and send_prompt)
+MSG_AGENT_NOT_CONNECTED = "Agent 未连接，请稍后再试。"
 
 
 class AgentManager:
@@ -42,14 +46,18 @@ class AgentManager:
         cwd: str,
         env: dict[str, str] | None = None,
         mcp_servers: list[McpServerConfig] | None = None,
+        initialize_timeout_seconds: float = 30.0,
+        retry_interval_seconds: float = 10.0,
     ) -> None:
-        # Agent subprocess and ACP connection manager
         self._process = AgentProcess(
             command=command,
             args=args,
             cwd=cwd,
             env=env,
         )
+        self._initialize_timeout_seconds = initialize_timeout_seconds
+        self._retry_interval_seconds = retry_interval_seconds
+        self._connection_task: asyncio.Task | None = None
 
         self._mcp_servers = mcp_servers or []
 
@@ -68,20 +76,38 @@ class AgentManager:
     # --- Lifecycle (delegated to AgentProcess) ---
 
     async def start(self) -> None:
-        """Start the agent subprocess and initialize the ACP connection."""
-        # Create the ACP client with a back-reference to this manager
+        """Start the connection loop in the background (non-blocking)."""
         client = NcatAcpClient(self)
-        await self._process.start(client)
+        self._connection_task = asyncio.create_task(self._connection_loop(client))
+
+    async def _connection_loop(self, client: NcatAcpClient) -> None:
+        """Retry connecting to the agent with fixed interval; wait for disconnect then retry."""
+        while True:
+            try:
+                await self._process.start_once(client, self._initialize_timeout_seconds)
+                await self._process.wait()
+            except asyncio.CancelledError:
+                logger.info("Agent connection loop cancelled")
+                break
+            except Exception as e:
+                logger.warning(
+                    "Agent connection failed (will retry in %.1fs): %s",
+                    self._retry_interval_seconds,
+                    e,
+                )
+            await asyncio.sleep(self._retry_interval_seconds)
 
     async def stop(self) -> None:
-        """Stop the agent subprocess and clean up all session state."""
-        # Clear all session mappings and event references
+        """Stop the connection loop and the agent subprocess."""
+        if self._connection_task is not None:
+            self._connection_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._connection_task
+            self._connection_task = None
         self._sessions.clear()
         self._accumulators.clear()
         self._active_prompts.clear()
         self._last_events.clear()
-
-        # Delegate process and connection shutdown
         await self._process.stop()
 
     @property
@@ -135,7 +161,8 @@ class AgentManager:
     async def _create_session(self, chat_id: str) -> str:
         """Create a new ACP session for the given chat_id."""
         conn = self._process.conn
-        assert conn is not None, "Agent not started"
+        if conn is None:
+            raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
 
         # Convert config objects to ACP-compatible dicts
         mcp_servers_payload = []
@@ -232,10 +259,11 @@ class AgentManager:
         Raises Exception on agent errors (caller should handle).
         """
         if not self.is_running:
-            raise RuntimeError("Agent is not running")
+            raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
 
         conn = self._process.conn
-        assert conn is not None
+        if conn is None:
+            raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
 
         # Get or create session
         session_id = await self.get_or_create_session(chat_id)

@@ -27,16 +27,18 @@ async def main() -> None:
     cwd.mkdir(parents=True, exist_ok=True)
     logger.info("Agent working directory: %s", cwd)
 
-    # Initialize and start the ACP agent manager
+    # Initialize agent manager (connection loop runs in background, does not block)
     agent_manager = AgentManager(
         command=config.agent.command,
         args=config.agent.args,
         cwd=str(cwd),
         env=config.agent.env or None,
         mcp_servers=config.mcp,
+        initialize_timeout_seconds=config.agent.initialize_timeout_seconds,
+        retry_interval_seconds=config.agent.retry_interval_seconds,
     )
     await agent_manager.start()
-    logger.info("ACP agent started")
+    logger.info("WebSocket server starting; agent connection will retry in background until ready")
 
     # Start WebSocket server for NapCatQQ
     server = NcatNapCatServer(

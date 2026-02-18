@@ -26,6 +26,12 @@ cp config.example.toml config.toml
 uv run python main.py
 ```
 
+ncat 会先启动 WebSocket 服务；Agent 连接在后台按固定间隔重试。若 Agent 尚未就绪，发消息或发送 `/new` 会收到提示：「Agent 未连接，请稍后再试。」
+
+**可选配置**（`config.toml` 的 `[agent]` 下）：
+- `initialize_timeout_seconds`：单次 ACP Initialize 等待超时（秒），默认 30。
+- `retry_interval_seconds`：连接失败或断开后，下次重试的间隔（秒），默认 10。
+
 然后配置 NapCatQQ 连接到 ncat 的 WebSocket 服务器（默认：`ws://127.0.0.1:8282`）。
 
 ## 部署为系统服务 (Systemd)

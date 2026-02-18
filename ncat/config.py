@@ -28,6 +28,10 @@ class AgentConfig:
     cwd: str = "~/.ncat/workspace"
     # Extra environment variables for the agent process (merged with system env)
     env: dict[str, str] = field(default_factory=dict)
+    # Timeout in seconds for ACP initialize; on timeout, retry after retry_interval_seconds
+    initialize_timeout_seconds: float = 30.0
+    # Fixed interval in seconds between connection attempts (no backoff)
+    retry_interval_seconds: float = 10.0
 
 
 @dataclass
@@ -105,7 +109,9 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
 
     # Build config from raw dict, using defaults for missing fields
     server = ServerConfig(**raw.get("server", {}))
-    agent_raw = raw.get("agent", {})
+    agent_raw = dict(raw.get("agent", {}))
+    agent_raw.setdefault("initialize_timeout_seconds", 30.0)
+    agent_raw.setdefault("retry_interval_seconds", 10.0)
     agent = AgentConfig(**agent_raw)
     
     mcp_raw = raw.get("mcp", [])

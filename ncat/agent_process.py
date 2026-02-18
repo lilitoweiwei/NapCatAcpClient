@@ -134,13 +134,14 @@ class AgentProcess:
         """Whether the connected agent supports image blocks in prompts."""
         return self._supports_image
 
-    async def start(self, client: Client) -> None:
-        """Start the agent subprocess and initialize the ACP connection.
+    async def start_once(self, client: Client, timeout: float) -> None:
+        """One-shot: start agent subprocess and complete ACP initialize with timeout.
 
-        Args:
-            client: ACP Client implementation that handles protocol callbacks
-                    (e.g. session_update, request_permission).
+        Cleans up any existing process/connection first. On timeout or any
+        exception, cleans up and re-raises for the caller to retry later.
         """
+        await self.stop()
+
         logger.info(
             "Starting agent: %s %s (cwd: %s)",
             self._command,
@@ -148,8 +149,6 @@ class AgentProcess:
             self._cwd,
         )
 
-        # Build subprocess environment: inherit system env, overlay user extras.
-        # We always pass an explicit env dict so extra vars take effect.
         proc_env: dict[str, str] | None = None
         if self._extra_env:
             proc_env = {**os.environ, **self._extra_env}
@@ -158,15 +157,10 @@ class AgentProcess:
                 ", ".join(self._extra_env.keys()),
             )
 
-        # Resolve the executable path. On Windows, create_subprocess_exec cannot
-        # run .cmd/.bat scripts directly (WinError 193), so we resolve the full
-        # path via shutil.which() and let the shell handle it.
         resolved = shutil.which(self._command)
         if resolved is None:
             raise FileNotFoundError(f"Agent command not found: {self._command}")
 
-        # On Windows, .cmd/.bat wrappers (e.g. npm-installed tools) must be
-        # executed through the shell. On Linux this is not needed.
         use_shell = sys.platform == "win32" and resolved.lower().endswith((".cmd", ".bat"))
         if use_shell:
             shell_args = [resolved, *self._args]
@@ -181,7 +175,6 @@ class AgentProcess:
                 env=proc_env,
             )
         else:
-            # Direct exec (Linux, or native .exe on Windows)
             self._process = await asyncio.create_subprocess_exec(
                 resolved,
                 *self._args,
@@ -192,10 +185,9 @@ class AgentProcess:
             )
 
         if self._process.stdin is None or self._process.stdout is None:
+            await self.stop()
             raise RuntimeError("Agent process does not expose stdio pipes")
 
-        # Establish ACP connection over stdin/stdout.
-        # Register a stream observer to log all JSON-RPC messages for debugging.
         self._conn = connect_to_agent(
             client,
             self._process.stdin,
@@ -203,20 +195,10 @@ class AgentProcess:
             observers=[_acp_stream_observer],
         )
 
-        # Initialize the ACP protocol.
-        #
-        # We bypass the SDK's conn.initialize() because its serialize_params()
-        # uses exclude_defaults=True, which silently drops fields whose values
-        # equal pydantic defaults (e.g. clientCapabilities, fs, terminal).
-        # Instead we construct the params dict directly so every field is
-        # explicitly present on the wire, matching the ACP spec examples.
         init_params = {
             "protocolVersion": PROTOCOL_VERSION,
             "clientCapabilities": {
-                "fs": {
-                    "readTextFile": False,
-                    "writeTextFile": False,
-                },
+                "fs": {"readTextFile": False, "writeTextFile": False},
                 "terminal": False,
             },
             "clientInfo": {
@@ -225,19 +207,30 @@ class AgentProcess:
                 "version": "0.2.0",
             },
         }
-        logger.debug(f"init_params: {init_params}")
+        logger.debug("init_params: %s", init_params)
         logger.info("Initializing ACP connection...")
-        raw_response = await self._conn._conn.send_request("initialize", init_params)
+        try:
+            raw_response = await asyncio.wait_for(
+                self._conn._conn.send_request("initialize", init_params),
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, Exception):
+            await self.stop()
+            raise
         init_result = InitializeResponse.model_validate(raw_response)
         prompt_caps = getattr(init_result.agent_capabilities, "prompt_capabilities", None)
         self._supports_image = bool(getattr(prompt_caps, "image", False))
-
         logger.info(
             "ACP initialized: agent=%s protocol_version=%s",
             init_result.agent_info,
             init_result.protocol_version,
         )
         logger.info("ACP prompt capabilities: image=%s", self._supports_image)
+
+    async def wait(self) -> None:
+        """Wait for the agent subprocess to exit (e.g. after connection is lost)."""
+        if self._process is not None and self._process.returncode is None:
+            await self._process.wait()
 
     async def stop(self) -> None:
         """Stop the agent subprocess and close the ACP connection."""

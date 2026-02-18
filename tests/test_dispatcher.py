@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 from acp.schema import PermissionOption
 
+from ncat.agent_manager import MSG_AGENT_NOT_CONNECTED
 from ncat.dispatcher import MessageDispatcher
 from ncat.permission import PendingPermission, PermissionBroker
 from tests.mock_agent import MockAgentManager
@@ -143,6 +144,26 @@ async def test_group_with_at_processed(handler_env) -> None:
 
 
 # --- Command tests ---
+
+
+async def test_agent_not_connected_message_reply(handler_env) -> None:
+    """Test that when agent is not connected, a normal message gets MSG_AGENT_NOT_CONNECTED."""
+    handler, mock_agent, replies = handler_env
+    mock_agent._is_running = False
+
+    await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
+    assert replies.last_text == MSG_AGENT_NOT_CONNECTED
+    assert len(mock_agent.calls) == 0
+
+
+async def test_agent_not_connected_new_reply(handler_env) -> None:
+    """Test that when agent is not connected, /new gets MSG_AGENT_NOT_CONNECTED."""
+    handler, mock_agent, replies = handler_env
+    mock_agent._is_running = False
+
+    await handler.handle_message(_private_event(111, "A", "/new"), BOT_ID)
+    assert replies.last_text == MSG_AGENT_NOT_CONNECTED
+    assert "private:111" not in mock_agent.closed_sessions
 
 
 async def test_command_new_closes_session(handler_env) -> None:

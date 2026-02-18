@@ -10,7 +10,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.agent_manager import AgentManager
+from ncat.agent_manager import AgentManager, MSG_AGENT_NOT_CONNECTED
 from ncat.command import HELP_TEXT, CommandExecutor
 from ncat.converter import onebot_to_internal
 from ncat.models import ContentPart
@@ -158,6 +158,12 @@ class MessageDispatcher:
                     parsed.chat_id,
                 )
                 await self._reply_fn(event, _MSG_BUSY)
+                return
+
+            # Step 6b: Reject if agent is not connected
+            if not self._agent_manager.is_running:
+                logger.info("Agent not connected for %s", parsed.chat_id)
+                await self._reply_fn(event, MSG_AGENT_NOT_CONNECTED)
                 return
 
             # Step 7: Dispatch to AI prompt runner

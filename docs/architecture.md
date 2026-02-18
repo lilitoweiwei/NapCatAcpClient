@@ -133,7 +133,7 @@ Manages the full lifecycle of a single AI prompt request:
 - Active task tracking per chat_id
 - Timeout notifications ("AI is thinking...", "/stop hint")
 - Delegating to `AgentManager.send_prompt()`
-- Error handling (agent crash → notify user, close session)
+- Error handling: on agent crash or mid-stream error, notifies the user and closes the session; when the agent fails after streaming some content, ncat sends that partial content to the user first, then a clear error message (e.g. “Agent 发生错误，以上为已生成的部分内容。错误信息：…”), so the user does not lose already-generated output
 - Cancellation support (via `asyncio.Task.cancel` + ACP `session/cancel`)
 
 ### `command.py` — CommandExecutor
@@ -188,6 +188,7 @@ Bridges ACP permission requests with QQ user interaction:
 - Stores last event per chat for permission reply routing
 - Accumulates agent response content from `session_update` callbacks
 - Sends prompt content blocks and collects accumulated responses as `list[ContentPart]`
+- On agent error mid-stream: raises `AgentErrorWithPartialContent(cause, partial_parts)` so the caller can send partial content to the user before reporting the error
 - Handles cancellation via ACP `session/cancel`
 
 ### `models.py`

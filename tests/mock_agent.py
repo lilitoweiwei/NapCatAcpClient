@@ -8,6 +8,7 @@ spawning a real ACP agent subprocess.
 import asyncio
 from typing import Any
 
+from ncat.agent_manager import AgentErrorWithPartialContent
 from ncat.models import ContentPart
 from ncat.permission import PermissionBroker
 
@@ -37,6 +38,8 @@ class MockAgentManager:
         self.all_sessions_closed: bool = False
         # Whether send_prompt should raise RuntimeError (simulates agent crash)
         self.should_crash: bool = False
+        # When set, send_prompt raises AgentErrorWithPartialContent(cause, parts)
+        self.raise_error_with_parts: tuple[BaseException, list[ContentPart]] | None = None
         # Whether agent is connected (False simulates "agent not connected")
         self._is_running: bool = True
         # Permission broker (set externally, mirrors real AgentManager)
@@ -111,6 +114,9 @@ class MockAgentManager:
         self.calls.append((chat_id, text))
         if self.should_crash:
             raise RuntimeError("Agent crashed")
+        if self.raise_error_with_parts is not None:
+            cause, parts = self.raise_error_with_parts
+            raise AgentErrorWithPartialContent(cause, parts)
         if self.delay > 0:
             await asyncio.sleep(self.delay)
         if self.response_parts is not None:

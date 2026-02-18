@@ -28,6 +28,18 @@ logger = logging.getLogger("ncat.agent_manager")
 MSG_AGENT_NOT_CONNECTED = "Agent 未连接，请稍后再试。"
 
 
+class AgentErrorWithPartialContent(Exception):
+    """Raised when the agent errors mid-stream; carries any content already received.
+
+    Callers can send the partial content to the user first, then report the error.
+    """
+
+    def __init__(self, cause: BaseException, partial_parts: list[ContentPart]) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.partial_parts = partial_parts
+
+
 class AgentManager:
     """Orchestrates ACP sessions, prompt sending, and content accumulation.
 
@@ -299,6 +311,11 @@ class AgentManager:
             # Clean up accumulator on cancellation
             self._accumulators.pop(session_id, None)
             raise
+
+        except Exception as e:
+            # Propagate partial content so the user can see what was already streamed
+            partial_parts = self._accumulators.pop(session_id, [])
+            raise AgentErrorWithPartialContent(e, partial_parts) from e
 
         finally:
             self._active_prompts.discard(chat_id)

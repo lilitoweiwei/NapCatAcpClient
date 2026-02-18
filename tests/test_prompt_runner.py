@@ -116,6 +116,59 @@ async def test_process_runtime_error_closes_session_and_replies_error() -> None:
     assert "private:111" in agent.closed_sessions
 
 
+async def test_process_error_with_partial_sends_partial_then_error() -> None:
+    """When agent raises with partial content, user gets partial reply then error message."""
+    from ncat.models import ContentPart
+
+    agent = MockAgentManager()
+    agent.raise_error_with_parts = (
+        Exception("Internal error"),
+        [ContentPart(type="text", text="Half of the answer here.")],
+    )
+    replies = ReplyQueue()
+    perm = PermissionBrokerSpy()
+    runner = PromptRunner(
+        agent_manager=agent,
+        reply_fn=replies,
+        permission_broker=perm,
+        thinking_notify_seconds=0,
+        thinking_long_notify_seconds=0,
+    )
+
+    await runner.process(_parsed_private("private:111", 111, "Alice", "x"), event={})
+
+    assert len(replies.texts) >= 2
+    assert replies.texts[0] == "Half of the answer here."
+    assert "Agent 发生错误" in replies.texts[1]
+    assert "以上为已生成的部分内容" in replies.texts[1]
+    assert "Internal error" in replies.texts[1]
+    assert "private:111" in agent.closed_sessions
+
+
+async def test_process_error_with_empty_partial_sends_only_error() -> None:
+    """When agent raises with no partial content, user gets only the error message."""
+    from ncat.models import ContentPart
+
+    agent = MockAgentManager()
+    agent.raise_error_with_parts = (Exception("Stream failed"), [])
+    replies = ReplyQueue()
+    perm = PermissionBrokerSpy()
+    runner = PromptRunner(
+        agent_manager=agent,
+        reply_fn=replies,
+        permission_broker=perm,
+        thinking_notify_seconds=0,
+        thinking_long_notify_seconds=0,
+    )
+
+    await runner.process(_parsed_private("private:111", 111, "Alice", "x"), event={})
+
+    assert len(replies.texts) == 1
+    assert "Agent 异常" in replies.texts[0]
+    assert "Stream failed" in replies.texts[0]
+    assert "private:111" in agent.closed_sessions
+
+
 async def test_is_busy_true_while_processing() -> None:
     """is_busy() should be True while an AI task is running for a chat."""
     agent = MockAgentManager()

@@ -8,7 +8,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.agent_manager import AgentManager
+from ncat.agent_manager import AgentErrorWithPartialContent, AgentManager
 from ncat.image_utils import download_image
 from ncat.models import ContentPart, ParsedMessage
 from ncat.permission import PermissionBroker
@@ -179,6 +179,28 @@ class PromptRunner:
             # Cancelled by /stop — notification already sent by the command executor
             logger.info("AI request cancelled for %s (user /stop)", chat_key)
             raise
+
+        except AgentErrorWithPartialContent as e:
+            # Agent failed mid-stream; send any partial content first, then the error
+            logger.error("AI processing error for %s: %s", chat_key, e.cause, exc_info=True)
+            if e.partial_parts:
+                has_text = any(p.type == "text" and p.text for p in e.partial_parts)
+                has_image = any(p.type == "image" and p.image_base64 for p in e.partial_parts)
+                if has_text or has_image:
+                    await self._reply_content_fn(event, e.partial_parts)
+                    await self._reply_fn(
+                        event,
+                        f"Agent 发生错误，以上为已生成的部分内容。\n错误信息：{e.cause}\n当前会话已关闭，下次对话将自动开启新会话。",
+                    )
+                else:
+                    await self._reply_fn(
+                        event, f"Agent 异常：{e.cause}\n当前会话已关闭，下次对话将自动开启新会话。"
+                    )
+            else:
+                await self._reply_fn(
+                    event, f"Agent 异常：{e.cause}\n当前会话已关闭，下次对话将自动开启新会话。"
+                )
+            await self._agent_manager.close_session(chat_key)
 
         except RuntimeError as e:
             # Agent not running (e.g. crashed)

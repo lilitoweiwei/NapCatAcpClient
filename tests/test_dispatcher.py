@@ -250,6 +250,26 @@ async def test_agent_crash_sends_error(handler_env) -> None:
     assert "private:111" in mock_agent.closed_sessions
 
 
+async def test_agent_error_with_partial_sends_partial_then_error(handler_env) -> None:
+    """When agent errors with partial content, user gets partial reply then error message."""
+    from ncat.models import ContentPart
+
+    handler, mock_agent, replies = handler_env
+    mock_agent.raise_error_with_parts = (
+        Exception("Internal error"),
+        [ContentPart(type="text", text="Partial reply.")],
+    )
+
+    await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
+
+    assert len(replies.texts) >= 2
+    assert replies.texts[0] == "Partial reply."
+    assert "Agent 发生错误" in replies.texts[1]
+    assert "以上为已生成的部分内容" in replies.texts[1]
+    assert "Internal error" in replies.texts[1]
+    assert "private:111" in mock_agent.closed_sessions
+
+
 async def test_prompt_includes_context(handler_env) -> None:
     """Test that the prompt sent to the agent includes sender context."""
     handler, mock_agent, replies = handler_env

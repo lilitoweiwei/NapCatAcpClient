@@ -8,3 +8,4 @@ __pycache__/
 .venv/
 config.toml
 .vscode/
+*.egg-info/

@@ -8,7 +8,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.agent_manager import AgentErrorWithPartialContent, AgentManager
+from ncat.agent_manager import AgentErrorWithPartialContent, AgentManager, MSG_AGENT_NOT_CONNECTED
 from ncat.image_utils import download_image
 from ncat.models import ContentPart, ParsedMessage
 from ncat.permission import PermissionBroker
@@ -203,13 +203,15 @@ class PromptRunner:
             await self._agent_manager.close_session(chat_key)
 
         except RuntimeError as e:
-            # Agent not running (e.g. crashed)
+            # Agent not running (e.g. connection failed or crashed)
             logger.error("Agent error for %s: %s", chat_key, e)
-            await self._reply_fn(
-                event, f"Agent 异常：{e}\n当前会话已关闭，下次对话将自动开启新会话。"
-            )
-            # Close the session for this chat on agent crash
-            await self._agent_manager.close_session(chat_key)
+            if str(e) == MSG_AGENT_NOT_CONNECTED:
+                await self._reply_fn(event, MSG_AGENT_NOT_CONNECTED)
+            else:
+                await self._reply_fn(
+                    event, f"Agent 异常：{e}\n当前会话已关闭，下次对话将自动开启新会话。"
+                )
+                await self._agent_manager.close_session(chat_key)
 
         except Exception as e:
             logger.error("AI processing error for %s: %s", chat_key, e, exc_info=True)

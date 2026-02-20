@@ -8,7 +8,7 @@ spawning a real ACP agent subprocess.
 import asyncio
 from typing import Any
 
-from ncat.agent_manager import AgentErrorWithPartialContent
+from ncat.agent_manager import AgentErrorWithPartialContent, MSG_AGENT_NOT_CONNECTED
 from ncat.models import ContentPart
 from ncat.permission import PermissionBroker
 
@@ -113,6 +113,8 @@ class MockAgentManager:
 
     async def send_prompt(self, chat_id: str, prompt: Any) -> list[ContentPart]:
         """Simulate sending a prompt. Records call, waits for delay, returns response."""
+        if not self._is_running:
+            raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
         text = prompt if isinstance(prompt, str) else ""
         if isinstance(prompt, list):
             self.calls_blocks.append((chat_id, prompt))

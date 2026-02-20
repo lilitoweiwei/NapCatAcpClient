@@ -26,7 +26,7 @@ cp config.example.toml config.toml
 uv run python main.py
 ```
 
-ncat 启动后先起 WebSocket 服务，**不**建立到 Agent 的连接；用户发送第一条需要 AI 的消息时才会建立连接。若连接失败（如 FAG 未就绪），会收到提示：「Agent 未连接，请稍后再试。」
+ncat 启动后先起 WebSocket 服务，**不**建立到 Agent 的连接；用户发送第一条需要 AI 的消息时会**先尝试建立连接**，再处理该条消息。若建连失败（如 FAG 未就绪），会收到提示：「Agent 未连接，请稍后再试。」（执行 `/new` 后下次发消息时同样会先尝试重连。）
 
 **指令 `/new` 与工作目录**：`/new` 结束当前会话并**断开与 Agent 的连接**，下次发消息时再重新连接（全新 Agent）。新会话的工作目录由 **Agent 网关（FAG）** 的默认配置决定。`/new <dir>` 则指定新会话的工作目录为网关的 workspace 下的 `<dir>`（如 `/new projectA` 表示 `/workspace/projectA`，具体路径由网关配置）。该指定仅对紧接着的那一次建会话生效，不持久化。
 

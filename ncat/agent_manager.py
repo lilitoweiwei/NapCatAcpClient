@@ -105,11 +105,14 @@ class AgentManager:
         async with self._connection_lock:
             if self._process.is_running:
                 return
+            logger.info("Ensuring agent connection (on-demand)...")
             if self._client is None:
                 self._client = NcatAcpClient(self)
             try:
                 await self._process.start_once(self._client, self._initialize_timeout_seconds)
-            except Exception:
+                logger.info("Agent connection established")
+            except Exception as e:
+                logger.warning("Agent connection failed: %s", e)
                 # Leave _client for next retry (caller will see is_running False)
                 raise
 

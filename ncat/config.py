@@ -29,7 +29,7 @@ class AgentConfig:
     # Extra environment variables for the agent process (merged with system env)
     env: dict[str, str] = field(default_factory=dict)
     # Timeout in seconds for ACP initialize; on timeout, retry after retry_interval_seconds
-    initialize_timeout_seconds: float = 30.0
+    initialize_timeout_seconds: float = 300.0
     # Fixed interval in seconds between connection attempts (no backoff)
     retry_interval_seconds: float = 10.0
 

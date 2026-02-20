@@ -213,6 +213,13 @@ class PromptRunner:
                 )
                 await self._agent_manager.close_session(chat_key)
 
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            # ACP initialize or connection timed out (e.g. agent cold start > timeout)
+            logger.error("Agent connection timeout for %s: %s", chat_key, e)
+            await self._reply_fn(
+                event, "连接 Agent 超时，请稍后再试。"
+            )
+
         except Exception as e:
             logger.error("AI processing error for %s: %s", chat_key, e, exc_info=True)
             await self._reply_fn(

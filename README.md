@@ -31,7 +31,7 @@ ncat 启动后先起 WebSocket 服务，**不**建立到 Agent 的连接；用�
 **指令 `/new` 与工作目录**：`/new` 结束当前会话并**断开与 Agent 的连接**，下次发消息时再重新连接（全新 Agent）。新会话的工作目录由 **Agent 网关（FAG）** 的默认配置决定。`/new <dir>` 则指定新会话的工作目录为网关的 workspace 下的 `<dir>`（如 `/new projectA` 表示 `/workspace/projectA`，具体路径由网关配置）。该指定仅对紧接着的那一次建会话生效，不持久化。
 
 **可选配置**（`config.toml` 的 `[agent]` 下）：
-- `initialize_timeout_seconds`：首次建连或重连时 ACP Initialize 等待超时（秒），默认 300。
+- `initialize_timeout_seconds`：首次建连或重连时 ACP Initialize 等待超时（秒），默认 30。
 - `retry_interval_seconds`：连接失败后，下次用户发消息时重试前的间隔（秒），默认 10。
 
 然后配置 NapCatQQ 连接到 ncat 的 WebSocket 服务器（默认：`ws://127.0.0.1:8282`）。

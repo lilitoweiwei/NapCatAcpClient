@@ -1,3 +1,10 @@
+[build-system]
+requires = ["setuptools>=68.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ncat*"]
+
 [project]
 name = "ncat"
 version = "0.2.0"

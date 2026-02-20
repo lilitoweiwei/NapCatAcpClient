@@ -157,13 +157,13 @@ async def test_agent_not_connected_message_reply(handler_env) -> None:
 
 
 async def test_agent_not_connected_new_reply(handler_env) -> None:
-    """Test that when agent is not connected, /new gets MSG_AGENT_NOT_CONNECTED."""
+    """Test that when agent is not connected, /new still succeeds (records cwd, closes session, disconnects)."""
     handler, mock_agent, replies = handler_env
     mock_agent._is_running = False
 
     await handler.handle_message(_private_event(111, "A", "/new"), BOT_ID)
-    assert replies.last_text == MSG_AGENT_NOT_CONNECTED
-    assert "private:111" not in mock_agent.closed_sessions
+    assert "新会话" in replies.last_text
+    assert "private:111" in mock_agent.closed_sessions
 
 
 async def test_command_new_closes_session(handler_env) -> None:

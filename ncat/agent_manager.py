@@ -9,7 +9,6 @@ by `ncat.acp_client.NcatAcpClient`.
 """
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -69,7 +68,6 @@ class AgentManager:
         )
         self._initialize_timeout_seconds = initialize_timeout_seconds
         self._retry_interval_seconds = retry_interval_seconds
-        self._connection_task: asyncio.Task | None = None
 
         self._mcp_servers = mcp_servers or []
 
@@ -90,43 +88,45 @@ class AgentManager:
         # Cleared when used in _create_session; not persisted.
         self._next_session_cwd: dict[str, str | None] = {}
 
-    # --- Lifecycle (delegated to AgentProcess) ---
+        # Lazy ACP client for on-demand connection (created in ensure_connection)
+        self._client: NcatAcpClient | None = None
+        self._connection_lock = asyncio.Lock()
+
+    # --- Lifecycle (on-demand connection, no background loop) ---
 
     async def start(self) -> None:
-        """Start the connection loop in the background (non-blocking)."""
-        client = NcatAcpClient(self)
-        self._connection_task = asyncio.create_task(self._connection_loop(client))
+        """No-op: ncat does not connect at startup; connection is established on first send_prompt."""
+        pass
 
-    async def _connection_loop(self, client: NcatAcpClient) -> None:
-        """Retry connecting to the agent with fixed interval; wait for disconnect then retry."""
-        while True:
+    async def ensure_connection(self) -> None:
+        """Establish connection to the agent if not already connected. Idempotent under lock."""
+        if self._process.is_running:
+            return
+        async with self._connection_lock:
+            if self._process.is_running:
+                return
+            if self._client is None:
+                self._client = NcatAcpClient(self)
             try:
-                await self._process.start_once(client, self._initialize_timeout_seconds)
-                await self._process.wait()
-            except asyncio.CancelledError:
-                logger.info("Agent connection loop cancelled")
-                break
-            except Exception as e:
-                logger.warning(
-                    "Agent connection failed (will retry in %.1fs): %s",
-                    self._retry_interval_seconds,
-                    e,
-                )
-            await asyncio.sleep(self._retry_interval_seconds)
+                await self._process.start_once(self._client, self._initialize_timeout_seconds)
+            except Exception:
+                # Leave _client for next retry (caller will see is_running False)
+                raise
 
-    async def stop(self) -> None:
-        """Stop the connection loop and the agent subprocess."""
-        if self._connection_task is not None:
-            self._connection_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._connection_task
-            self._connection_task = None
+    async def disconnect(self) -> None:
+        """Stop the agent subprocess and clear session state. Call after /new or NapCat disconnect."""
+        await self._process.stop()
         self._sessions.clear()
         self._accumulators.clear()
         self._active_prompts.clear()
         self._last_events.clear()
         self._next_session_cwd.clear()
-        await self._process.stop()
+        self._client = None
+        logger.info("Agent disconnected")
+
+    async def stop(self) -> None:
+        """Stop the agent subprocess and clear state (e.g. on ncat shutdown)."""
+        await self.disconnect()
 
     @property
     def is_running(self) -> bool:
@@ -285,10 +285,11 @@ class AgentManager:
     async def send_prompt(self, chat_id: str, prompt: Sequence[PromptBlock]) -> list[ContentPart]:
         """Send a prompt to the agent and wait for the complete response.
 
-        Returns the accumulated response parts.
-        Raises RuntimeError if the agent is not running.
+        Connects on demand if not already connected. Returns the accumulated response parts.
+        Raises RuntimeError if the agent is not running (e.g. connection failed).
         Raises Exception on agent errors (caller should handle).
         """
+        await self.ensure_connection()
         if not self.is_running:
             raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
 

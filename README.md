@@ -4,11 +4,11 @@
 
 ## 工作原理
 
-ncat 作为一个 **ACP 客户端**：它以子进程方式启动兼容 ACP 的智能体，通过标准输入/输出 (stdin/stdout) 进行 ACP 协议通信，并将来自 QQ（通过 NapCatQQ）的用户消息桥接到智能体。
+ncat 作为一个 **ACP 客户端**：启动后不主动连接 Agent，仅在用户发送**第一条需要 AI 的消息**时建立到 Agent 网关（FAG）的连接，通过 FAG 与兼容 ACP 的智能体通信；来自 QQ（通过 NapCatQQ）的消息经 ncat 桥接到智能体。
 
 ```
-QQ 用户 → NapCat (反向 WS) → ncat → ACP 智能体 (stdin/stdout)
-QQ 用户 ← NapCat (反向 WS) ← ncat ← ACP 智能体 (stdin/stdout)
+QQ 用户 → NapCat (反向 WS) → ncat →（按需连接）→ FAG → ACP 智能体
+QQ 用户 ← NapCat (反向 WS) ← ncat ← FAG ← ACP 智能体
 ```
 
 ## 快速启动
@@ -26,13 +26,13 @@ cp config.example.toml config.toml
 uv run python main.py
 ```
 
-ncat 会先启动 WebSocket 服务；Agent 连接在后台按固定间隔重试。若 Agent 尚未就绪，发消息或发送 `/new` 会收到提示：「Agent 未连接，请稍后再试。」
+ncat 启动后先起 WebSocket 服务，**不**建立到 Agent 的连接；用户发送第一条需要 AI 的消息时才会建立连接。若连接失败（如 FAG 未就绪），会收到提示：「Agent 未连接，请稍后再试。」
 
-**指令 `/new` 与工作目录**：`/new` 创建新会话（清空 AI 上下文），下次发消息时新建的会话工作目录由 **Agent 网关（FAG）** 的默认配置决定。`/new <dir>` 则指定新会话的工作目录为网关的 workspace 下的 `<dir>`（如 `/new projectA` 表示 `/workspace/projectA`，具体路径由网关配置）。该指定仅对紧接着的那一次建会话生效，不持久化。
+**指令 `/new` 与工作目录**：`/new` 结束当前会话并**断开与 Agent 的连接**，下次发消息时再重新连接（全新 Agent）。新会话的工作目录由 **Agent 网关（FAG）** 的默认配置决定。`/new <dir>` 则指定新会话的工作目录为网关的 workspace 下的 `<dir>`（如 `/new projectA` 表示 `/workspace/projectA`，具体路径由网关配置）。该指定仅对紧接着的那一次建会话生效，不持久化。
 
 **可选配置**（`config.toml` 的 `[agent]` 下）：
-- `initialize_timeout_seconds`：单次 ACP Initialize 等待超时（秒），默认 30。
-- `retry_interval_seconds`：连接失败或断开后，下次重试的间隔（秒），默认 10。
+- `initialize_timeout_seconds`：首次建连或重连时 ACP Initialize 等待超时（秒），默认 30。
+- `retry_interval_seconds`：连接失败后，下次用户发消息时重试前的间隔（秒），默认 10。
 
 然后配置 NapCatQQ 连接到 ncat 的 WebSocket 服务器（默认：`ws://127.0.0.1:8282`）。
 

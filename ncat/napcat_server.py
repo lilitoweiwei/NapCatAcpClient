@@ -114,9 +114,10 @@ class NcatNapCatServer:
         finally:
             if self._connection is websocket:
                 self._connection = None
-                # Close all ACP sessions when NapCat disconnects
+                # Close all ACP sessions and disconnect from agent when NapCat disconnects
                 logger.info("NapCat disconnected, closing all ACP sessions")
                 await self._agent_manager.close_all_sessions()
+                await self._agent_manager.disconnect()
             logger.info("Connection handler exited")
 
     async def _dispatch_event(self, event: dict) -> None:

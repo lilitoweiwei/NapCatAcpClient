@@ -8,7 +8,7 @@ whether the message was handled as a command (True) or not (False).
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.agent_manager import AgentManager, MSG_AGENT_NOT_CONNECTED
+from ncat.agent_manager import AgentManager
 from ncat.models import ParsedMessage
 
 logger = logging.getLogger("ncat.command")
@@ -115,14 +115,12 @@ class CommandExecutor:
     async def _execute(self, command: str, parsed: ParsedMessage, event: dict) -> None:
         """Execute a parsed command (internal dispatch)."""
         if command == "new":
-            if not self._agent_manager.is_running:
-                await self._reply_fn(event, MSG_AGENT_NOT_CONNECTED)
-                return
             # Set one-time cwd for next session: None = empty (FAG default), else dir for FAG to concatenate
             dir_or_none = parse_new_dir(parsed.text)
             self._agent_manager.set_next_session_cwd(parsed.chat_id, dir_or_none)
-            # Close current ACP session; a new one will be created on next message
+            # Close current ACP session and disconnect from agent; reconnect on next message
             await self._agent_manager.close_session(parsed.chat_id)
+            await self._agent_manager.disconnect()
             await self._reply_fn(event, _MSG_NEW_SESSION)
             logger.info(
                 "New session will be created for %s on next message (cwd dir=%s)",

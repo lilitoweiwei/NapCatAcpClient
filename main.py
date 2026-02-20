@@ -27,7 +27,7 @@ async def main() -> None:
     cwd.mkdir(parents=True, exist_ok=True)
     logger.info("Agent working directory: %s", cwd)
 
-    # Initialize agent manager (connection loop runs in background, does not block)
+    # Initialize agent manager (no connection at startup; connect on first user message)
     agent_manager = AgentManager(
         command=config.agent.command,
         args=config.agent.args,
@@ -37,8 +37,7 @@ async def main() -> None:
         initialize_timeout_seconds=config.agent.initialize_timeout_seconds,
         retry_interval_seconds=config.agent.retry_interval_seconds,
     )
-    await agent_manager.start()
-    logger.info("WebSocket server starting; agent connection will retry in background until ready")
+    logger.info("WebSocket server starting; agent will connect on first user message")
 
     # Start WebSocket server for NapCatQQ
     server = NcatNapCatServer(

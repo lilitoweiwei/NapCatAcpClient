@@ -85,6 +85,12 @@ class MockAgentManager:
     async def stop(self) -> None:
         pass
 
+    async def ensure_connection(self) -> None:
+        pass
+
+    async def disconnect(self) -> None:
+        pass
+
     async def get_or_create_session(self, chat_id: str) -> str:
         return f"mock_session_{chat_id}"
 

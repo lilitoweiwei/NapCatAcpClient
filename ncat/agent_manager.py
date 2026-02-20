@@ -85,6 +85,11 @@ class AgentManager:
         # Last event dict per chat (needed for permission reply routing)
         self._last_events: dict[str, dict] = {}
 
+        # One-time cwd for the next session creation only (plan: /new [<dir>]).
+        # Key: chat_id; value: dir to send in session/new (None = send empty, FAG uses default).
+        # Cleared when used in _create_session; not persisted.
+        self._next_session_cwd: dict[str, str | None] = {}
+
     # --- Lifecycle (delegated to AgentProcess) ---
 
     async def start(self) -> None:
@@ -120,6 +125,7 @@ class AgentManager:
         self._accumulators.clear()
         self._active_prompts.clear()
         self._last_events.clear()
+        self._next_session_cwd.clear()
         await self._process.stop()
 
     @property
@@ -170,11 +176,24 @@ class AgentManager:
 
         return await self._create_session(chat_id)
 
+    def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
+        """Set cwd for the next session creation only (used by /new [<dir>]).
+
+        dir_or_none: None = send empty cwd (FAG uses default); str = send this dir, FAG concatenates with workspace_base.
+        Each call overwrites any previous value for this chat. Consumed once in _create_session.
+        """
+        self._next_session_cwd[chat_id] = dir_or_none
+
     async def _create_session(self, chat_id: str) -> str:
         """Create a new ACP session for the given chat_id."""
         conn = self._process.conn
         if conn is None:
             raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
+
+        # One-time cwd: pop so we don't persist. None = send empty string (FAG uses default_cwd)
+        cwd_val = self._next_session_cwd.pop(chat_id, None)
+        # ACP library expects str; send "" for "use FAG default", or the dir string for FAG to concatenate
+        cwd = cwd_val if cwd_val is not None else ""
 
         # Convert config objects to ACP-compatible dicts
         mcp_servers_payload = []
@@ -213,7 +232,7 @@ class AgentManager:
             logger.info("No MCP servers configured for this session")
 
         session = await conn.new_session(
-            cwd=self._process.cwd,
+            cwd=cwd,
             mcp_servers=mcp_servers_payload,
         )
         session_id = session.session_id

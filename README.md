@@ -28,6 +28,8 @@ uv run python main.py
 
 ncat 会先启动 WebSocket 服务；Agent 连接在后台按固定间隔重试。若 Agent 尚未就绪，发消息或发送 `/new` 会收到提示：「Agent 未连接，请稍后再试。」
 
+**指令 `/new` 与工作目录**：`/new` 创建新会话（清空 AI 上下文），下次发消息时新建的会话工作目录由 **Agent 网关（FAG）** 的默认配置决定。`/new <dir>` 则指定新会话的工作目录为网关的 workspace 下的 `<dir>`（如 `/new projectA` 表示 `/workspace/projectA`，具体路径由网关配置）。该指定仅对紧接着的那一次建会话生效，不持久化。
+
 **可选配置**（`config.toml` 的 `[agent]` 下）：
 - `initialize_timeout_seconds`：单次 ACP Initialize 等待超时（秒），默认 30。
 - `retry_interval_seconds`：连接失败或断开后，下次重试的间隔（秒），默认 10。
@@ -55,7 +57,7 @@ ncat 具备两个通信面：**NapCat 侧 (Server)** 接收 NapCatQQ 的 WebSock
 
 **模块一览**：`main.py` 入口；`ncat/napcat_server.py` 面向 NapCat 的传输层；`dispatcher.py` 消息分发（解析 → 过滤 → 路由）；`prompt_runner.py` 单次 prompt 生命周期（超时、发送、取消）；`permission.py` 权限代理（将 ACP 权限请求转给 QQ 用户）；`command.py` 命令执行（/new、/stop、/help）；`agent_manager.py` 会话编排（chat_id ↔ session_id）；`agent_process.py` Agent 子进程与 ACP 连接；`acp_client.py` ACP 回调（session_update、request_permission）；`converter.py`、`prompt_builder.py`、`image_utils.py` 负责 OneBot 与 ACP 格式转换及图片下载；`config.py`、`log.py`、`models.py` 配置、日志与共享数据类型。
 
-**数据流概要**：NapCat 事件 → NcatNapCatServer 分发 → MessageDispatcher（解析、过滤、命令/权限/忙碌检查）→ PromptRunner → AgentManager.send_prompt（映射会话、发 ACP、积累 ContentPart）→ 回复经 NcatAcpClient.session_update 回传 → 转 OneBot 段发回 NapCat。会话为内存映射，无持久化；/new 清除映射，下次消息新建会话。
+**数据流概要**：NapCat 事件 → NcatNapCatServer 分发 → MessageDispatcher（解析、过滤、命令/权限/忙碌检查）→ PromptRunner → AgentManager.send_prompt（映射会话、发 ACP、积累 ContentPart）→ 回复经 NcatAcpClient.session_update 回传 → 转 OneBot 段发回 NapCat。会话为内存映射，无持久化；/new 或 /new \<dir\> 清除映射并可选设置下次建会话的 cwd（用后即清），下次消息新建会话。
 
 ## 路线图与待办
 

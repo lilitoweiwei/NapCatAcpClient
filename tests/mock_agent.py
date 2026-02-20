@@ -88,6 +88,10 @@ class MockAgentManager:
     async def get_or_create_session(self, chat_id: str) -> str:
         return f"mock_session_{chat_id}"
 
+    def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
+        """No-op for mock; real AgentManager uses this for /new [<dir>]."""
+        pass
+
     async def close_session(self, chat_id: str) -> None:
         self.closed_sessions.add(chat_id)
 

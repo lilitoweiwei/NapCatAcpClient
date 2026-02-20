@@ -24,7 +24,8 @@ CancelFn = Callable[[str], bool]
 # Help text template shown for /help and unknown commands
 HELP_TEXT = (
     "ncat 指令列表：\n"
-    "/new  - 创建新会话（清空 AI 上下文）\n"
+    "/new - 创建新会话（工作目录由 Agent 网关默认配置决定）\n"
+    "/new <dir> - 创建新会话并指定工作目录为 /workspace/<dir>\n"
     "/stop - 中断当前 AI 思考\n"
     "/send <text> - 将文本原样转发给 agent（不触发 ncat 指令）\n"
     "/help - 显示本帮助信息\n"
@@ -53,6 +54,24 @@ def parse_command(text: str) -> str | None:
     # Map known commands; anything else is "unknown"
     known = {"new": "new", "stop": "stop", "help": "help"}
     return known.get(cmd, "unknown")
+
+
+def parse_new_dir(text: str) -> str | None:
+    """
+    Parse optional <dir> from /new or /new <dir>.
+
+    Returns None for "/new" (no dir); returns the dir string for "/new <dir>"
+    (e.g. "projectA" or "a/b"). Each /new overwrites; this only parses one message.
+    """
+    if not text.startswith("/"):
+        return None
+    parts = text.split(maxsplit=1)
+    if not parts or parts[0][1:].lower() != "new":
+        return None
+    if len(parts) < 2:
+        return None
+    rest = parts[1].strip()
+    return rest if rest else None
 
 
 class CommandExecutor:
@@ -99,10 +118,17 @@ class CommandExecutor:
             if not self._agent_manager.is_running:
                 await self._reply_fn(event, MSG_AGENT_NOT_CONNECTED)
                 return
+            # Set one-time cwd for next session: None = empty (FAG default), else dir for FAG to concatenate
+            dir_or_none = parse_new_dir(parsed.text)
+            self._agent_manager.set_next_session_cwd(parsed.chat_id, dir_or_none)
             # Close current ACP session; a new one will be created on next message
             await self._agent_manager.close_session(parsed.chat_id)
             await self._reply_fn(event, _MSG_NEW_SESSION)
-            logger.info("New session will be created for %s on next message", parsed.chat_id)
+            logger.info(
+                "New session will be created for %s on next message (cwd dir=%s)",
+                parsed.chat_id,
+                dir_or_none,
+            )
 
         elif command == "stop":
             # Cancel the active AI task for this chat via callback

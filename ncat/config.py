@@ -110,7 +110,7 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
     # Build config from raw dict, using defaults for missing fields
     server = ServerConfig(**raw.get("server", {}))
     agent_raw = dict(raw.get("agent", {}))
-    agent_raw.setdefault("initialize_timeout_seconds", 30.0)
+    agent_raw.setdefault("initialize_timeout_seconds", 300.0)
     agent_raw.setdefault("retry_interval_seconds", 10.0)
     agent = AgentConfig(**agent_raw)
     

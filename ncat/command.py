@@ -118,9 +118,9 @@ class CommandExecutor:
             # Set one-time cwd for next session: None = empty (FAG default), else dir for FAG to concatenate
             dir_or_none = parse_new_dir(parsed.text)
             self._agent_manager.set_next_session_cwd(parsed.chat_id, dir_or_none)
-            # Close current ACP session and disconnect from agent; reconnect on next message
+            # Close current ACP session and disconnect from agent for this chat only; reconnect on next message
             await self._agent_manager.close_session(parsed.chat_id)
-            await self._agent_manager.disconnect()
+            await self._agent_manager.disconnect(parsed.chat_id)
             await self._reply_fn(event, _MSG_NEW_SESSION)
             logger.info(
                 "New session will be created for %s on next message (cwd dir=%s)",

@@ -1,156 +1,135 @@
-"""User command parsing and execution — handles /new, /stop, /help, etc.
+"""User command handling with unified command system.
 
-parse_command() is a pure function for identifying commands from message text.
-CommandExecutor.try_handle() uses it internally — callers only need to know
-whether the message was handled as a command (True) or not (False).
+All commands (/new, /stop, /bg *, etc.) are registered in a central registry
+with regex patterns and handler functions. Help text is automatically generated.
 """
 
 import logging
-from collections.abc import Awaitable, Callable
 
 from ncat.agent_manager import AgentManager
-from ncat.models import ParsedMessage
+from ncat.command_system import CommandRegistry
 
 logger = logging.getLogger("ncat.command")
 
-# Type alias for the reply callback provided by the transport layer.
-# Signature: async reply_fn(event: dict, text: str) -> None
-ReplyFn = Callable[[dict, str], Awaitable[None]]
-
-# Type alias for the cancel callback provided by PromptRunner.
-# Signature: cancel_fn(chat_id: str) -> bool (True if cancelled, False if no active task)
-CancelFn = Callable[[str], bool]
-
-# Help text template shown for /help and unknown commands
-HELP_TEXT = (
-    "ncat 指令列表：\n"
-    "基础指令：\n"
-    "  /new - 创建新会话（工作目录由 Agent 网关默认配置决定）\n"
-    "  /new <dir> - 创建新会话并指定工作目录为 /workspace/<dir>\n"
-    "  /stop - 中断当前 AI 思考\n"
-    "  /send <text> - 将文本原样转发给 agent（不触发 ncat 指令）\n"
-    "\n"
-    "后台会话指令：\n"
-    "  /bg new <prompt> - 创建后台会话\n"
-    "  /bg newn <name> <prompt> - 创建后台会话（指定名称）\n"
-    "  /bg ls - 列出所有后台会话\n"
-    "  /bg to i <index> <prompt> - 向指定编号的会话发送 prompt\n"
-    "  /bg to n <name> <prompt> - 向指定名称的会话发送 prompt\n"
-    "  /bg stop i <index> - 停止指定编号的会话\n"
-    "  /bg stop n <name> - 停止指定名称的会话\n"
-    "  /bg stop wait - 停止所有等待中的会话\n"
-    "  /bg stop all - 停止所有会话\n"
-    "  /bg history i <index> - 查看指定编号会话的历史\n"
-    "  /bg history n <name> - 查看指定名称会话的历史\n"
-    "  /bg last i <index> - 查看指定编号会话的最后一条输出\n"
-    "  /bg last n <name> - 查看指定名称会话的最后一条输出\n"
-    "\n"
-    "/help - 显示本帮助信息\n"
-    "直接发送文字即可与 AI 对话。"
+# Create global command registry
+command_registry = CommandRegistry(
+    header_text="ncat 指令列表：\n\n基础指令："
 )
 
 # --- Command response messages ---
 _MSG_NEW_SESSION = "已创建新会话，AI 上下文已清空。"
 _MSG_STOPPED = "已中断当前 AI 思考。"
 _MSG_NO_ACTIVE = "当前没有进行中的 AI 思考。"
+_MSG_HELP = "直接发送文字即可与 AI 对话。"
 
 
-def parse_command(text: str) -> str | None:
+@command_registry.register(
+    pattern=r"^/new(?:\s+(?P<dir>\S+))?$",
+    help_text="/new [dir] - 创建新会话（工作目录由 Agent 网关默认配置决定）",
+    name="new",
+)
+async def handle_new(
+    chat_id: str,
+    dir: str | None,
+    event: dict,
+    reply_fn,
+    agent_manager: AgentManager,
+) -> None:
+    """Handle /new and /new <dir> commands.
+
+    Args:
+        chat_id: QQ chat ID
+        dir: Optional workspace directory name
+        event: Raw event dict
+        reply_fn: Callback to send reply
+        agent_manager: Agent manager instance
     """
-    Parse user command from message text.
+    # Set one-time cwd for next session
+    agent_manager.set_next_session_cwd(chat_id, dir)
+    # Close current ACP session and disconnect
+    await agent_manager.close_session(chat_id)
+    await agent_manager.disconnect(chat_id)
+    await reply_fn(event, _MSG_NEW_SESSION)
+    logger.info(
+        "New session will be created for %s on next message (cwd dir=%s)",
+        chat_id,
+        dir,
+    )
+
+
+@command_registry.register(
+    pattern=r"^/stop$",
+    help_text="/stop - 中断当前 AI 思考",
+    name="stop",
+)
+async def handle_stop(
+    chat_id: str,
+    event: dict,
+    reply_fn,
+    cancel_fn,
+) -> None:
+    """Handle /stop command.
+
+    Args:
+        chat_id: QQ chat ID
+        event: Raw event dict
+        reply_fn: Callback to send reply
+        cancel_fn: Callback to cancel active AI task
+    """
+    if cancel_fn(chat_id):
+        await reply_fn(event, _MSG_STOPPED)
+    else:
+        await reply_fn(event, _MSG_NO_ACTIVE)
+
+
+@command_registry.register(
+    pattern=r"^/send(?:\s+(?P<body>.*))?$",
+    help_text="/send <text> - 将文本原样转发给 agent（不触发 ncat 指令）",
+    name="send",
+)
+async def handle_send(
+    body: str | None,
+    event: dict,
+    reply_fn,
+) -> None:
+    """Handle /send command.
+
+    Args:
+        body: Message body to forward
+        event: Raw event dict
+        reply_fn: Callback to send reply
+    """
+    if not body:
+        # /send with no payload - will be handled by dispatcher
+        pass
+    else:
+        await reply_fn(event, body)
+
+
+@command_registry.register(
+    pattern=r"^/help$",
+    help_text="/help - 显示本帮助信息",
+    name="help",
+)
+async def handle_help(
+    event: dict,
+    reply_fn,
+) -> None:
+    """Handle /help command.
+
+    Args:
+        event: Raw event dict
+        reply_fn: Callback to send reply
+    """
+    help_text = command_registry.generate_help_text() + "\n\n" + _MSG_HELP
+    await reply_fn(event, help_text)
+
+
+# Legacy function for backward compatibility (used by dispatcher)
+def get_help_text() -> str:
+    """Generate help text from registry.
 
     Returns:
-        "new" for /new, "stop" for /stop, "help" for /help,
-        "unknown" for other /commands, None for regular messages.
+        Aggregated help text
     """
-    if not text.startswith("/"):
-        return None
-
-    # Extract command name (first word after /)
-    cmd = text.split()[0][1:].lower() if text.split() else ""
-    # Map known commands; anything else is "unknown"
-    known = {"new": "new", "stop": "stop", "help": "help"}
-    return known.get(cmd, "unknown")
-
-
-def parse_new_dir(text: str) -> str | None:
-    """
-    Parse optional <dir> from /new or /new <dir>.
-
-    Returns None for "/new" (no dir); returns the dir string for "/new <dir>"
-    (e.g. "projectA" or "a/b"). Each /new overwrites; this only parses one message.
-    """
-    if not text.startswith("/"):
-        return None
-    parts = text.split(maxsplit=1)
-    if not parts or parts[0][1:].lower() != "new":
-        return None
-    if len(parts) < 2:
-        return None
-    rest = parts[1].strip()
-    return rest if rest else None
-
-
-class CommandExecutor:
-    """
-    Parses and executes user commands (/new, /stop, /help).
-
-    The sole public entry point is try_handle(), which checks whether the
-    message is a command and executes it if so. Callers only see a bool.
-    Dependencies are injected via constructor to keep this module decoupled
-    from the AI processing layer — /stop uses a cancel_fn callback rather
-    than a direct reference to PromptRunner.
-    """
-
-    def __init__(
-        self,
-        agent_manager: AgentManager,
-        reply_fn: ReplyFn,
-        cancel_fn: CancelFn,
-    ) -> None:
-        # Agent manager for /new command (close + recreate session)
-        self._agent_manager = agent_manager
-        # Callback to send a text reply back to the QQ message source
-        self._reply_fn = reply_fn
-        # Callback to cancel an active AI task (bridges to PromptRunner.cancel)
-        self._cancel_fn = cancel_fn
-
-    async def try_handle(self, parsed: ParsedMessage, event: dict) -> bool:
-        """
-        Try to handle the message as a command.
-
-        Returns True if the message was a command (handled), False otherwise.
-        """
-        command = parse_command(parsed.text)
-        if command is None:
-            return False
-
-        logger.info("Command received: /%s from %s", command, parsed.chat_id)
-        await self._execute(command, parsed, event)
-        return True
-
-    async def _execute(self, command: str, parsed: ParsedMessage, event: dict) -> None:
-        """Execute a parsed command (internal dispatch)."""
-        if command == "new":
-            # Set one-time cwd for next session: None = empty (FAG default), else dir for FAG to concatenate
-            dir_or_none = parse_new_dir(parsed.text)
-            self._agent_manager.set_next_session_cwd(parsed.chat_id, dir_or_none)
-            # Close current ACP session and disconnect from agent for this chat only; reconnect on next message
-            await self._agent_manager.close_session(parsed.chat_id)
-            await self._agent_manager.disconnect(parsed.chat_id)
-            await self._reply_fn(event, _MSG_NEW_SESSION)
-            logger.info(
-                "New session will be created for %s on next message (cwd dir=%s)",
-                parsed.chat_id,
-                dir_or_none,
-            )
-
-        elif command == "stop":
-            # Cancel the active AI task for this chat via callback
-            if self._cancel_fn(parsed.chat_id):
-                await self._reply_fn(event, _MSG_STOPPED)
-            else:
-                await self._reply_fn(event, _MSG_NO_ACTIVE)
-
-        elif command == "help" or command == "unknown":
-            await self._reply_fn(event, HELP_TEXT)
+    return command_registry.generate_help_text() + "\n\n" + _MSG_HELP

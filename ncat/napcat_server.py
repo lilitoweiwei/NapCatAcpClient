@@ -35,6 +35,7 @@ class NcatNapCatServer:
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
         image_download_timeout: float = 15.0,
+        bsp_client=None,
     ) -> None:
         # WebSocket bind address and port
         self._host = host
@@ -59,6 +60,7 @@ class NcatNapCatServer:
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
             image_download_timeout=image_download_timeout,
+            bsp_client=bsp_client,
         )
 
     async def start(self) -> None:
@@ -162,6 +164,31 @@ class NcatNapCatServer:
             logger.debug("Unknown post_type: %s keys=%s", post_type, list(event.keys()))
 
     # --- Outbound messaging ---
+
+    async def send_qq_reply(self, chat_id: str, text: str) -> None:
+        """Send a QQ reply to the specified chat ID.
+
+        This is a wrapper for MQTT notifications to send replies without
+        needing the original event dict.
+
+        Args:
+            chat_id: QQ chat ID (user_id for private, group_id for group)
+            text: Reply text
+        """
+        # Determine if this is a private or group message based on chat_id format
+        # For simplicity, assume all numeric chat_ids are private messages
+        # In production, you might want to track chat types separately
+        try:
+            user_id = int(chat_id)
+            segments = ai_to_onebot(text)
+            resp = await self.send_api(
+                "send_private_msg",
+                {"user_id": user_id, "message": segments},
+            )
+            if resp and resp.get("retcode") != 0:
+                logger.warning("send_private_msg failed: %s", resp)
+        except ValueError:
+            logger.warning("Invalid chat_id for MQTT notification: %s", chat_id)
 
     async def _reply_text(self, event: dict, text: str) -> None:
         """Send a text reply back to the source of the message event."""

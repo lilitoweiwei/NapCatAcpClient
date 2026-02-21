@@ -41,6 +41,20 @@ cwd = "~/.ncat/workspace"
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/files"]
 
+# BSP server for background session management
+[bsp_server]
+enabled = true
+host = "127.0.0.1"
+port = 8766
+
+# MQTT broker for session notifications
+[mqtt]
+enabled = true
+host = "suzu-mosquitto"
+port = 1883
+topic_prefix = "suzu"
+client_id = "ncat"
+
 [ux]
 # Seconds before sending "AI is thinking" notification (0 to disable).
 thinking_notify_seconds = 10

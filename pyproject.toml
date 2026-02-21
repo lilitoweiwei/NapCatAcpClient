@@ -15,6 +15,7 @@ dependencies = [
     "websockets",
     "agent-client-protocol>=0.8.1",
     "httpx",
+    "aiomqtt",
 ]
 
 [tool.pytest.ini_options]

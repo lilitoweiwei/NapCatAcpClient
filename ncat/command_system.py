@@ -5,20 +5,21 @@ Provides a registry-based command system where each command is defined by:
 - A handler function that receives parsed groups
 - Help text that's automatically aggregated
 
-Usage:
+Usage::
+
     registry = CommandRegistry(header="My Commands:")
-    
+
     @registry.register(
-        pattern=r"^/hello\s+(?P<name>\w+)$",
+        pattern=r"^/hello\\s+(?P<name>\\w+)$",
         help_text="/hello <name> - Say hello",
         name="hello",
     )
     async def handle_hello(name: str, chat_id: str, reply_fn, event):
         await reply_fn(event, f"Hello, {name}!")
-    
+
     # Execute commands
     matched = await registry.execute(text, chat_id=..., reply_fn=..., event=...)
-    
+
     # Generate help text
     help_text = registry.generate_help_text()
 """

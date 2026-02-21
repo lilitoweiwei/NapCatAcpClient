@@ -5,11 +5,9 @@ import contextlib
 
 import pytest
 import pytest_asyncio
-from acp.schema import PermissionOption
 
 from ncat.agent_manager import MSG_AGENT_NOT_CONNECTED
 from ncat.dispatcher import MessageDispatcher
-from ncat.permission import PendingPermission, PermissionBroker
 from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
@@ -42,13 +40,9 @@ async def handler_env():
     """Create a MessageDispatcher with mock agent manager and reply collector."""
     mock_agent = MockAgentManager()
     replies = ReplyCollector()
-    # PermissionBroker with long timeout (won't fire in normal tests)
-    broker = PermissionBroker(reply_fn=replies, timeout=300)
-    mock_agent.permission_broker = broker
     handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
-        permission_broker=broker,
     )
 
     yield handler, mock_agent, replies
@@ -59,12 +53,9 @@ async def timeout_env():
     """Create a handler with short timeout thresholds for testing notifications."""
     mock_agent = MockAgentManager()
     replies = ReplyCollector()
-    broker = PermissionBroker(reply_fn=replies, timeout=300)
-    mock_agent.permission_broker = broker
     handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
-        permission_broker=broker,
         thinking_notify_seconds=0.3,
         thinking_long_notify_seconds=0.8,
     )
@@ -398,54 +389,6 @@ async def test_no_notification_on_fast_response(handler_env) -> None:
     assert replies.last_text == "Mock AI response"
 
 
-# --- Pending permission interception tests ---
-
-
-async def test_pending_permission_invalid_input_shows_hint(handler_env) -> None:
-    """If permission is pending, non-numeric input should be intercepted and hinted."""
-    handler, mock_agent, replies = handler_env
-    broker = mock_agent.permission_broker
-    assert broker is not None
-
-    chat_id = "private:111"
-    loop = asyncio.get_running_loop()
-    future = loop.create_future()
-    options = [PermissionOption(kind="allow_once", name="Allow once", optionId="o1")]
-    broker._pending[chat_id] = PendingPermission(future=future, options=options, event={})
-
-    await handler.handle_message(_private_event(111, "A", "not a number"), BOT_ID)
-
-    assert "待处理的权限请求" in replies.last_text
-    assert future.done() is False
-    assert len(mock_agent.calls) == 0
-
-    broker.cancel_pending(chat_id)
-
-
-async def test_pending_permission_valid_reply_resolves_without_reply(handler_env) -> None:
-    """If permission is pending, a numeric reply should resolve without extra replies."""
-    handler, mock_agent, replies = handler_env
-    broker = mock_agent.permission_broker
-    assert broker is not None
-
-    chat_id = "private:111"
-    loop = asyncio.get_running_loop()
-    future = loop.create_future()
-    options = [PermissionOption(kind="allow_once", name="Allow once", optionId="o1")]
-    broker._pending[chat_id] = PendingPermission(future=future, options=options, event={})
-
-    before = len(replies.replies)
-    await handler.handle_message(_private_event(111, "A", "1"), BOT_ID)
-    after = len(replies.replies)
-
-    assert after == before
-    assert future.done() is True
-    assert future.result().option_id == "o1"
-    assert len(mock_agent.calls) == 0
-
-    broker.cancel_pending(chat_id)
-
-
 # --- Internal error handling tests ---
 
 
@@ -460,12 +403,9 @@ async def test_internal_exception_sends_error_reply(monkeypatch) -> None:
 
     mock_agent = MockAgentManager()
     replies = ReplyCollector()
-    broker = PermissionBroker(reply_fn=replies, timeout=300)
-    mock_agent.permission_broker = broker
     handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
-        permission_broker=broker,
     )
 
     await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)

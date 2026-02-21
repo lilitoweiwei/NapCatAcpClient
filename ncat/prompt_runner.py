@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from ncat.agent_manager import AgentErrorWithPartialContent, AgentManager, MSG_AGENT_NOT_CONNECTED
 from ncat.image_utils import download_image
 from ncat.models import ContentPart, ParsedMessage
-from ncat.permission import PermissionBroker
 from ncat.prompt_builder import build_prompt_blocks
 
 logger = logging.getLogger("ncat.prompt_runner")
@@ -41,7 +40,6 @@ class PromptRunner:
         self,
         agent_manager: AgentManager,
         reply_fn: ReplyFn,
-        permission_broker: PermissionBroker,
         reply_content_fn: ReplyContentFn | None = None,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
@@ -58,8 +56,6 @@ class PromptRunner:
             await self._reply_fn(event, text or "AI 未返回有效回复")
 
         self._reply_content_fn = reply_content_fn or _reply_content_fallback
-        # Permission broker (cancel pending requests on /stop)
-        self._permission_broker = permission_broker
         # Seconds before sending first "AI is thinking" notification (0 = disabled)
         self._thinking_notify_seconds = thinking_notify_seconds
         # Seconds before sending "thinking too long, use /stop" notification (0 = disabled)
@@ -77,17 +73,11 @@ class PromptRunner:
         """
         Cancel the active AI task for the given chat.
 
-        Also cancels any pending permission request for this chat (the
-        PermissionBroker future will be cancelled, causing the ACP handler
-        to return a DeniedOutcome).
-
         Returns True if a task was found and cancellation was requested,
         False if no active task exists for this chat.
         """
         task = self._active_tasks.get(chat_id)
         if task is not None and not task.done():
-            # Cancel any pending permission request first (resolves immediately)
-            self._permission_broker.cancel_pending(chat_id)
             task.cancel()
             # Also send ACP cancel notification to the agent
             cancel_task = asyncio.create_task(self._agent_manager.cancel(chat_id))

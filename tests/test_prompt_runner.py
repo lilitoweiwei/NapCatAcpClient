@@ -28,16 +28,6 @@ class ReplyQueue:
         return await asyncio.wait_for(self.items.get(), timeout=timeout)
 
 
-class PermissionBrokerSpy:
-    """Spy that records cancel_pending() calls made by PromptRunner.cancel()."""
-
-    def __init__(self) -> None:
-        self.cancelled: list[str] = []
-
-    def cancel_pending(self, chat_id: str) -> None:
-        self.cancelled.append(chat_id)
-
-
 def _parsed_private(chat_id: str, sender_id: int, sender_name: str, text: str) -> ParsedMessage:
     """Build a ParsedMessage for a private chat."""
     return ParsedMessage(
@@ -55,11 +45,9 @@ async def test_process_sends_agent_reply() -> None:
     """process() should send the agent response as a QQ reply."""
     agent = MockAgentManager()
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,  # not used in process(), only in cancel()
         thinking_notify_seconds=0,
         thinking_long_notify_seconds=0,
     )
@@ -81,11 +69,9 @@ async def test_process_empty_response_sends_warning() -> None:
     agent = MockAgentManager()
     agent.response_text = ""
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0,
         thinking_long_notify_seconds=0,
     )
@@ -99,11 +85,9 @@ async def test_process_runtime_error_closes_session_and_replies_error() -> None:
     agent = MockAgentManager()
     agent.should_crash = True
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0,
         thinking_long_notify_seconds=0,
     )
@@ -126,11 +110,9 @@ async def test_process_error_with_partial_sends_partial_then_error() -> None:
         [ContentPart(type="text", text="Half of the answer here.")],
     )
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0,
         thinking_long_notify_seconds=0,
     )
@@ -152,11 +134,9 @@ async def test_process_error_with_empty_partial_sends_only_error() -> None:
     agent = MockAgentManager()
     agent.raise_error_with_parts = (Exception("Stream failed"), [])
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0,
         thinking_long_notify_seconds=0,
     )
@@ -174,11 +154,9 @@ async def test_is_busy_true_while_processing() -> None:
     agent = MockAgentManager()
     agent.delay = 0.2
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0,
         thinking_long_notify_seconds=0,
     )
@@ -196,16 +174,14 @@ async def test_is_busy_true_while_processing() -> None:
     assert runner.is_busy("private:111") is False
 
 
-async def test_cancel_cancels_active_task_and_permission_pending() -> None:
-    """cancel() should cancel the active task, cancel pending permission, and notify the agent."""
+async def test_cancel_cancels_active_task_and_notifies_agent() -> None:
+    """cancel() should cancel the active task and notify the agent."""
     agent = MockAgentManager()
     agent.delay = 5.0
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0,
         thinking_long_notify_seconds=0,
     )
@@ -224,9 +200,6 @@ async def test_cancel_cancels_active_task_and_permission_pending() -> None:
         await task
     assert task.cancelled()
 
-    # cancel() should also propagate to PermissionBroker and agent cancel().
-    assert perm.cancelled == ["private:111"]
-
     # agent.cancel() runs in a background task; yield control once.
     await asyncio.sleep(0)
     assert "private:111" in agent.cancelled
@@ -239,11 +212,9 @@ async def test_thinking_notifications_fire_when_slow() -> None:
     agent = MockAgentManager()
     agent.delay = 0.15
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0.05,
         thinking_long_notify_seconds=0,
     )
@@ -262,11 +233,9 @@ async def test_long_thinking_notification_fires_when_very_slow() -> None:
     agent = MockAgentManager()
     agent.delay = 0.25
     replies = ReplyQueue()
-    perm = PermissionBrokerSpy()
     runner = PromptRunner(
         agent_manager=agent,
         reply_fn=replies,
-        permission_broker=perm,
         thinking_notify_seconds=0.05,
         thinking_long_notify_seconds=0.1,
     )

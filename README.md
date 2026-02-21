@@ -55,12 +55,12 @@ sudo bash scripts/install-service.sh
 
 ncat 具备两个通信面：**NapCat 侧 (Server)** 接收 NapCatQQ 的 WebSocket（OneBot v11），**ACP 侧 (Client)** 以子进程方式启动 AI Agent，通过 stdin/stdout 进行 ACP (JSON-RPC 2.0) 通信。
 
-**模块一览**：`main.py` 入口；`ncat/napcat_server.py` 面向 NapCat 的传输层；`dispatcher.py` 消息分发（解析 → 过滤 → 路由）；`prompt_runner.py` 单次 prompt 生命周期（超时、发送、取消）；`permission.py` 权限代理（将 ACP 权限请求转给 QQ 用户）；`command.py` 命令执行（/new、/stop、/help）；`agent_manager.py` 会话编排（chat_id ↔ session_id）；`agent_process.py` Agent 子进程与 ACP 连接；`acp_client.py` ACP 回调（session_update、request_permission）；`converter.py`、`prompt_builder.py`、`image_utils.py` 负责 OneBot 与 ACP 格式转换及图片下载；`config.py`、`log.py`、`models.py` 配置、日志与共享数据类型。
+**模块一览**：`main.py` 入口；`ncat/napcat_server.py` 面向 NapCat 的传输层；`dispatcher.py` 消息分发（解析 → 过滤 → 路由）；`prompt_runner.py` 单次 prompt 生命周期（超时、发送、取消）；`command.py` 命令执行（/new、/stop、/help）；`agent_manager.py` 会话编排（chat_id ↔ session_id）；`agent_process.py` Agent 子进程与 ACP 连接；`acp_client.py` ACP 回调（session_update、request_permission 服务端一律批准）；`converter.py`、`prompt_builder.py`、`image_utils.py` 负责 OneBot 与 ACP 格式转换及图片下载；`config.py`、`log.py`、`models.py` 配置、日志与共享数据类型。
 
-**数据流概要**：NapCat 事件 → NcatNapCatServer 分发 → MessageDispatcher（解析、过滤、命令/权限/忙碌检查）→ PromptRunner → AgentManager.send_prompt（映射会话、发 ACP、积累 ContentPart）→ 回复经 NcatAcpClient.session_update 回传 → 转 OneBot 段发回 NapCat。会话为内存映射，无持久化；/new 或 /new \<dir\> 清除映射并可选设置下次建会话的 cwd（用后即清），下次消息新建会话。
+**数据流概要**：NapCat 事件 → NcatNapCatServer 分发 → MessageDispatcher（解析、过滤、命令/忙碌检查）→ PromptRunner → AgentManager.send_prompt（映射会话、发 ACP、积累 ContentPart）→ 回复经 NcatAcpClient.session_update 回传 → 转 OneBot 段发回 NapCat。会话为内存映射，无持久化；/new 或 /new \<dir\> 清除映射并可选设置下次建会话的 cwd（用后即清），下次消息新建会话。
 
 ## 路线图与待办
 
-**已完成**：项目更名为 ncat、后端切换为 ACP、移除 SQLite 持久化、System prompt 交由 Agent、即时通知、权限请求转发 QQ 用户、/send 指令、AgentManager 独立、Image 支持等。
+**已完成**：项目更名为 ncat、后端切换为 ACP、移除 SQLite 持久化、System prompt 交由 Agent、即时通知、权限请求由服务端默认一律批准、/send 指令、AgentManager 独立、Image 支持等。
 
 **计划中**：agent→qq 分段发送（超时前先发已积累内容）；超时反馈机制改善；将 NapCat 能力暴露为 MCP server；Agent 崩溃后自动重启；更智能的群消息过滤；可配置的 context header。

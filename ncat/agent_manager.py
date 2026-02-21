@@ -11,15 +11,11 @@ by `ncat.acp_client.NcatAcpClient`.
 import asyncio
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from ncat.acp_client import NcatAcpClient
 from ncat.agent_process import AgentProcess, PromptBlock
 from ncat.config import McpServerConfig
 from ncat.models import ContentPart
-
-if TYPE_CHECKING:
-    from ncat.permission import PermissionBroker
 
 logger = logging.getLogger("ncat.agent_manager")
 
@@ -78,11 +74,6 @@ class AgentManager:
         # Active prompt tracking: chat_id -> True while prompt is in flight
         self._active_prompts: set[str] = set()
 
-        # Permission broker (set externally after construction)
-        self._permission_broker: PermissionBroker | None = None
-        # Last event dict per chat (needed for permission reply routing)
-        self._last_events: dict[str, dict] = {}
-
         # One-time cwd for the next session creation only (plan: /new [<dir>]).
         # Key: chat_id; value: dir to send in session/new (None = send empty, FAG uses default).
         # Cleared when used in _create_session; not persisted.
@@ -122,7 +113,6 @@ class AgentManager:
         self._sessions.clear()
         self._accumulators.clear()
         self._active_prompts.clear()
-        self._last_events.clear()
         # _next_session_cwd is intentionally NOT cleared here: it must survive the
         # disconnect so the cwd set by /new <dir> is picked up when the next session
         # is created after reconnection.
@@ -143,31 +133,12 @@ class AgentManager:
         """Whether the connected agent supports image blocks in prompts."""
         return self._process.supports_image
 
-    # --- Permission broker ---
-
-    @property
-    def permission_broker(self) -> "PermissionBroker | None":
-        """Get the permission broker (set externally after construction)."""
-        return self._permission_broker
-
-    @permission_broker.setter
-    def permission_broker(self, broker: "PermissionBroker") -> None:
-        self._permission_broker = broker
-
     def get_chat_id(self, session_id: str) -> str | None:
         """Reverse lookup: find the chat_id that owns this ACP session."""
         for chat_id, sid in self._sessions.items():
             if sid == session_id:
                 return chat_id
         return None
-
-    def get_last_event(self, chat_id: str) -> dict | None:
-        """Get the last message event for a chat (used for reply routing)."""
-        return self._last_events.get(chat_id)
-
-    def set_last_event(self, chat_id: str, event: dict) -> None:
-        """Store the last message event for a chat."""
-        self._last_events[chat_id] = event
 
     # --- Session management ---
 
@@ -251,18 +222,12 @@ class AgentManager:
 
         ACP has no explicit session close; we simply remove the mapping
         so a new session will be created on next interaction.
-        Also clears any "always" permission decisions for this session.
         """
         session_id = self._sessions.pop(chat_id, None)
         if session_id:
             # Clean up any pending accumulator
             self._accumulators.pop(session_id, None)
-            # Clear cached "always" permission decisions for this session
-            if self._permission_broker is not None:
-                self._permission_broker.clear_session(session_id)
             logger.info("Closed session %s for chat %s", session_id, chat_id)
-        # Clean up last event reference
-        self._last_events.pop(chat_id, None)
 
     async def close_all_sessions(self) -> None:
         """Close all active sessions (e.g. on NapCat disconnect)."""

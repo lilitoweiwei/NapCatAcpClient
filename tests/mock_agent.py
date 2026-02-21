@@ -10,7 +10,6 @@ from typing import Any
 
 from ncat.agent_manager import AgentErrorWithPartialContent, MSG_AGENT_NOT_CONNECTED
 from ncat.models import ContentPart
-from ncat.permission import PermissionBroker
 
 
 class MockAgentManager:
@@ -42,10 +41,6 @@ class MockAgentManager:
         self.raise_error_with_parts: tuple[BaseException, list[ContentPart]] | None = None
         # Whether agent is connected (False simulates "agent not connected")
         self._is_running: bool = True
-        # Permission broker (set externally, mirrors real AgentManager)
-        self._permission_broker: PermissionBroker | None = None
-        # Last event per chat (for permission reply routing)
-        self._last_events: dict[str, dict[str, Any]] = {}
         # Agent capability flag (mirrors real AgentManager.supports_image)
         self._supports_image: bool = False
 
@@ -57,14 +52,6 @@ class MockAgentManager:
     def supports_image(self) -> bool:
         return self._supports_image
 
-    @property
-    def permission_broker(self) -> PermissionBroker | None:
-        return self._permission_broker
-
-    @permission_broker.setter
-    def permission_broker(self, broker: PermissionBroker) -> None:
-        self._permission_broker = broker
-
     def get_chat_id(self, session_id: str) -> str | None:
         """Reverse lookup (mock): extract chat_id from mock session_id format."""
         # Mock session IDs have the format "mock_session_{chat_id}"
@@ -72,12 +59,6 @@ class MockAgentManager:
         if session_id.startswith(prefix):
             return session_id[len(prefix) :]
         return None
-
-    def get_last_event(self, chat_id: str) -> dict[str, Any] | None:
-        return self._last_events.get(chat_id)
-
-    def set_last_event(self, chat_id: str, event: dict[str, Any]) -> None:
-        self._last_events[chat_id] = event
 
     async def start(self) -> None:
         pass

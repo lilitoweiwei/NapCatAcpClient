@@ -46,8 +46,6 @@ async def main() -> None:
         agent_manager=agent_manager,
         thinking_notify_seconds=config.ux.thinking_notify_seconds,
         thinking_long_notify_seconds=config.ux.thinking_long_notify_seconds,
-        permission_timeout=config.ux.permission_timeout,
-        permission_raw_input_max_len=config.ux.permission_raw_input_max_len,
         image_download_timeout=config.ux.image_download_timeout,
     )
 

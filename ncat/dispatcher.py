@@ -1,8 +1,7 @@
 """Message dispatcher — thin orchestrator that routes messages.
 
-Routes incoming QQ message events to either the CommandExecutor (for /commands),
-the PermissionBroker (for pending permission replies), or the PromptRunner
-(for AI requests). Handles filtering and busy rejection.
+Routes incoming QQ message events to either the CommandExecutor (for /commands)
+or the PromptRunner (for AI requests). Handles filtering and busy rejection.
 """
 
 import asyncio
@@ -14,7 +13,6 @@ from ncat.agent_manager import AgentManager
 from ncat.command import HELP_TEXT, CommandExecutor
 from ncat.converter import onebot_to_internal
 from ncat.models import ContentPart
-from ncat.permission import PermissionBroker
 from ncat.prompt_runner import PromptRunner
 
 logger = logging.getLogger("ncat.dispatcher")
@@ -29,14 +27,10 @@ ReplyContentFn = Callable[[dict, list[ContentPart]], Awaitable[None]]
 # Busy rejection message (dispatching-level concern)
 _MSG_BUSY = "AI 正在思考中，请等待或使用 /stop 中断。"
 
-# Hint shown when user sends non-numeric text while a permission request is pending
-_MSG_PERMISSION_HINT = "当前有待处理的权限请求，请回复编号选择，或使用 /stop 取消。"
-
 
 class MessageDispatcher:
     """
-    Thin dispatcher: parse → filter → route to CommandExecutor,
-    PermissionBroker, or PromptRunner.
+    Thin dispatcher: parse → filter → route to CommandExecutor or PromptRunner.
 
     Decoupled from WebSocket transport: sends replies via the reply_fn callback.
     """
@@ -45,7 +39,6 @@ class MessageDispatcher:
         self,
         agent_manager: AgentManager,
         reply_fn: ReplyFn,
-        permission_broker: PermissionBroker,
         reply_content_fn: ReplyContentFn | None = None,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
@@ -53,10 +46,8 @@ class MessageDispatcher:
     ) -> None:
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
-        # Agent manager (needed for storing last_event)
+        # Agent manager
         self._agent_manager = agent_manager
-        # Permission broker for forwarding permission requests to QQ users
-        self._permission_broker = permission_broker
 
         async def _reply_content_fallback(event: dict, parts: list[ContentPart]) -> None:
             # Fallback: deliver text-only if the transport doesn't support images.
@@ -68,7 +59,6 @@ class MessageDispatcher:
             agent_manager=agent_manager,
             reply_fn=reply_fn,
             reply_content_fn=reply_content_fn or _reply_content_fallback,
-            permission_broker=permission_broker,
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
             image_download_timeout=image_download_timeout,
@@ -89,9 +79,8 @@ class MessageDispatcher:
         1. Filter (group @bot check)
         2. /send prefix stripping (forward to agent bypassing commands)
         3. Commands (/new, /stop, /help)
-        4. Pending permission replies (intercept all non-command messages)
-        5. Busy rejection (AI already processing)
-        6. AI prompt dispatch
+        4. Busy rejection (AI already processing)
+        5. AI prompt dispatch
 
         Args:
             event: Raw OneBot 11 message event dict
@@ -118,10 +107,6 @@ class MessageDispatcher:
                 parsed.text[:100],
             )
 
-            # Store the latest event for this chat (used by PermissionBroker
-            # for reply routing when the agent requests permission)
-            self._agent_manager.set_last_event(parsed.chat_id, event)
-
             # Step 3: Handle /send — strip prefix and forward as a regular
             # message so that agent slash commands (e.g. /help) don't collide
             # with ncat's own commands.
@@ -141,17 +126,7 @@ class MessageDispatcher:
             if not send_forwarded and await self._cmd.try_handle(parsed, event):
                 return
 
-            # Step 5: Check for pending permission request — intercept all
-            # non-command messages when a permission reply is expected
-            if self._permission_broker.has_pending(parsed.chat_id):
-                if self._permission_broker.try_resolve(parsed.chat_id, parsed.text):
-                    logger.info("Permission resolved by user reply for %s", parsed.chat_id)
-                else:
-                    # Invalid input — remind user about the pending request
-                    await self._reply_fn(event, _MSG_PERMISSION_HINT)
-                return
-
-            # Step 6: Reject if AI is already processing for this chat
+            # Step 5: Reject if AI is already processing for this chat
             if self._ai.is_busy(parsed.chat_id):
                 logger.info(
                     "Busy rejection for %s (AI already processing)",
@@ -160,7 +135,7 @@ class MessageDispatcher:
                 await self._reply_fn(event, _MSG_BUSY)
                 return
 
-            # Step 7: Dispatch to AI prompt runner (connection is established on demand in send_prompt)
+            # Step 6: Dispatch to AI prompt runner (connection is established on demand in send_prompt)
             logger.debug(
                 "Dispatching to AI for %s (agent is_running=%s)",
                 parsed.chat_id,

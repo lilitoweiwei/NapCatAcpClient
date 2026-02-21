@@ -1,7 +1,8 @@
 """ACP client module — ACP protocol callbacks for ncat.
 
 Contains `NcatAcpClient`, which implements ACP Client protocol callbacks
-(`session_update`, `request_permission`, etc.). Agent subprocess management
+(`session_update`, `request_permission`, etc.). Permission requests are
+auto-approved by the server (no user prompt). Agent subprocess management
 and session lifecycle live in `ncat.agent_manager.AgentManager`.
 """
 
@@ -18,6 +19,7 @@ from acp.schema import (
     ConfigOptionUpdate,
     CreateTerminalResponse,
     CurrentModeUpdate,
+    DeniedOutcome,
     EnvVariable,
     ImageContentBlock,
     KillTerminalCommandResponse,
@@ -49,8 +51,9 @@ class NcatAcpClient(Client):
     """ACP Client protocol implementation for ncat.
 
     Handles callbacks from the ACP agent: accumulates response text from
-    session_update notifications, forwards permission requests to QQ users
-    via PermissionBroker, and rejects unsupported capabilities (fs, terminal).
+    session_update notifications, auto-approves all permission requests
+    (prefer allow_always, then allow_once, else first option), and rejects
+    unsupported capabilities (fs, terminal).
     """
 
     def __init__(self, agent_manager: "AgentManager") -> None:
@@ -109,38 +112,24 @@ class NcatAcpClient(Client):
         tool_call: ToolCallUpdate,
         **kwargs: Any,
     ) -> RequestPermissionResponse:
-        """Forward permission requests to the QQ user via PermissionBroker.
-
-        Looks up the chat_id for this session, retrieves the last event for
-        reply routing, and delegates to the PermissionBroker which handles
-        caching, user interaction, and timeout.
-        """
-        broker = self._agent_manager.permission_broker
-        if broker is None:
-            # Fallback: auto-approve if no broker is configured (should not happen)
-            logger.warning("No PermissionBroker configured, auto-approving")
-            first = options[0]
-            return RequestPermissionResponse(
-                outcome=AllowedOutcome(outcome="selected", option_id=first.option_id)
-            )
-
-        # Reverse lookup: session_id -> chat_id
-        chat_id = self._agent_manager.get_chat_id(session_id)
-        if chat_id is None:
-            logger.error("No chat_id found for session %s, cancelling permission", session_id)
-            from acp.schema import DeniedOutcome
-
+        """Auto-approve permission requests: prefer allow_always, then allow_once, else first option."""
+        if not options:
             return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
-
-        # Retrieve the last event for this chat so we can send reply messages
-        event = self._agent_manager.get_last_event(chat_id)
-        if event is None:
-            logger.error("No event context for chat %s, cancelling permission", chat_id)
-            from acp.schema import DeniedOutcome
-
-            return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
-
-        return await broker.handle(session_id, chat_id, event, tool_call, options)
+        selected = None
+        for opt in options:
+            if opt.kind == "allow_always":
+                selected = opt
+                break
+        if selected is None:
+            for opt in options:
+                if opt.kind == "allow_once":
+                    selected = opt
+                    break
+        if selected is None:
+            selected = options[0]
+        return RequestPermissionResponse(
+            outcome=AllowedOutcome(outcome="selected", option_id=selected.option_id)
+        )
 
     # --- Unsupported capabilities (fs, terminal) ---
 

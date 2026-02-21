@@ -56,8 +56,9 @@ class NcatAcpClient(Client):
     unsupported capabilities (fs, terminal).
     """
 
-    def __init__(self, agent_manager: "AgentManager") -> None:
+    def __init__(self, agent_manager: "AgentManager", chat_id: str) -> None:
         self._agent_manager = agent_manager
+        self._chat_id = chat_id  # Used to locate AgentConnection in callbacks
 
     # --- Core callbacks ---
 
@@ -88,11 +89,13 @@ class NcatAcpClient(Client):
             # Extract content and accumulate it in order.
             if isinstance(update.content, TextContentBlock):
                 self._agent_manager.accumulate_part(
+                    self._chat_id,
                     session_id,
                     ContentPart(type="text", text=update.content.text),
                 )
             elif isinstance(update.content, ImageContentBlock):
                 self._agent_manager.accumulate_part(
+                    self._chat_id,
                     session_id,
                     ContentPart(
                         type="image",
@@ -101,9 +104,9 @@ class NcatAcpClient(Client):
                     ),
                 )
         elif isinstance(update, (ToolCallStart, ToolCallProgress)):
-            logger.debug("Tool call update for session %s: %s", session_id, type(update).__name__)
+            logger.debug("Tool call update for session %s (chat %s): %s", session_id, self._chat_id, type(update).__name__)
         elif isinstance(update, AgentPlanUpdate):
-            logger.debug("Agent plan update for session %s", session_id)
+            logger.debug("Agent plan update for session %s (chat %s)", session_id, self._chat_id)
 
     async def request_permission(
         self,

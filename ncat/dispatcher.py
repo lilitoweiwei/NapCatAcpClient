@@ -78,6 +78,19 @@ class MessageDispatcher:
             command_registry.get_command_count(),
         )
 
+    async def handle_message(self, event: dict, bot_id: int | None = None) -> None:
+        """
+        Handle an incoming QQ message event.
+
+        This is the main entry point called by napcat_server.py.
+        The bot_id parameter is kept for backward compatibility but not used.
+
+        Args:
+            event: Raw QQ message event dict
+            bot_id: Bot QQ ID (unused, kept for API compatibility)
+        """
+        await self.dispatch(event)
+
     async def dispatch(self, event: dict) -> None:
         """
         Dispatch an incoming QQ message event.

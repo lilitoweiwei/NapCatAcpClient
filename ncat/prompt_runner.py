@@ -118,7 +118,8 @@ class PromptRunner:
             )
 
         try:
-            supports_image = getattr(self._agent_manager, "supports_image", False)
+            chat_id = parsed.chat_id
+            supports_image = getattr(self._agent_manager, "supports_image", lambda cid: False)(chat_id)
             downloaded_images: list[tuple[str, str] | None] = []
             if supports_image:
                 # Download images before sending the prompt so we can attach ACP image blocks.

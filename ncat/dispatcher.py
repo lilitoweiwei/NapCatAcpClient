@@ -139,7 +139,7 @@ class MessageDispatcher:
             logger.debug(
                 "Dispatching to AI for %s (agent is_running=%s)",
                 parsed.chat_id,
-                self._agent_manager.is_running,
+                self._agent_manager.is_running(parsed.chat_id),
             )
             await self._ai.process(parsed, event)
 

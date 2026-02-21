@@ -7,6 +7,7 @@ or the PromptRunner (for AI requests). Handles filtering and busy rejection.
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable
 
 from ncat.agent_manager import AgentManager
 from ncat.bsp_client import BspClient

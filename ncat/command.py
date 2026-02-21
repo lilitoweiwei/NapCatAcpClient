@@ -91,6 +91,7 @@ async def handle_send(
     body: str | None,
     event: dict,
     reply_fn,
+    **kwargs,
 ) -> None:
     """Handle /send command.
 
@@ -98,6 +99,7 @@ async def handle_send(
         body: Message body to forward
         event: Raw event dict
         reply_fn: Callback to send reply
+        **kwargs: Additional dependencies (ignored for this command)
     """
     if not body:
         # /send with no payload - will be handled by dispatcher
@@ -114,12 +116,14 @@ async def handle_send(
 async def handle_help(
     event: dict,
     reply_fn,
+    **kwargs,
 ) -> None:
     """Handle /help command.
 
     Args:
         event: Raw event dict
         reply_fn: Callback to send reply
+        **kwargs: Additional dependencies (ignored for this command)
     """
     help_text = command_registry.generate_help_text() + "\n\n" + _MSG_HELP
     await reply_fn(event, help_text)

@@ -1,0 +1,51 @@
+# ncat configuration file
+
+[server]
+host = "0.0.0.0"
+port = 8282
+
+[agent]
+# Command to start the ACP agent (connect_agent.sh bridges stdio to FAG via socat).
+# In container use /app/agents/connect_agent.sh; on host use path to repo/agents.
+command = "/app/agents/connect_agent.sh"
+# Arguments for the agent command (--port must match FAG server port, e.g. 8765).
+args = ["--port", "8765", "--debug", "--log", "/app/core/log/ncat_socat_connect_fag.log"]
+# Working directory for the agent process.
+cwd = "/app/agents"
+# Timeout in seconds for ACP initialize; after timeout or failure, retry after retry_interval_seconds.
+# initialize_timeout_seconds = 300
+# Fixed interval in seconds between connection attempts.
+# retry_interval_seconds = 10
+
+# NapCat MCP (STDIO): use venv binary to avoid uv lock contention at runtime
+[[mcp]]
+name = "napcat_mcp"
+transport = "stdio"
+command = "/home/dev/.venv/bin/napcat-mcp"
+args = ["--transport", "stdio"]
+
+# BSP server for background session management
+[bsp_server]
+enabled = true
+host = "127.0.0.1"
+port = 8766
+
+# MQTT broker for session notifications
+[mqtt]
+enabled = true
+host = "mqtt-broker"
+port = 1883
+topic_prefix = "suzu"
+client_id = "ncat"
+
+[logging]
+level = "DEBUG"
+dir = "log"
+
+[ux]
+# Seconds before notifying the user that the AI is thinking.
+thinking_notify_seconds = 10
+# Seconds before notifying the user that the AI is taking a long time to think.
+thinking_long_notify_seconds = 30
+# Timeout for downloading images.
+image_download_timeout = 15.0

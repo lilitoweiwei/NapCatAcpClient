@@ -123,7 +123,9 @@ class AgentManager:
         self._accumulators.clear()
         self._active_prompts.clear()
         self._last_events.clear()
-        self._next_session_cwd.clear()
+        # _next_session_cwd is intentionally NOT cleared here: it must survive the
+        # disconnect so the cwd set by /new <dir> is picked up when the next session
+        # is created after reconnection.
         self._client = None
         logger.info("Agent disconnected")
 

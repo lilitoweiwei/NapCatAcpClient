@@ -44,12 +44,10 @@ class MockAgentManager:
         # Agent capability flag (mirrors real AgentManager.supports_image)
         self._supports_image: bool = False
 
-    @property
-    def is_running(self) -> bool:
+    def is_running(self, chat_id: str) -> bool:
         return self._is_running
 
-    @property
-    def supports_image(self) -> bool:
+    def supports_image(self, chat_id: str) -> bool:
         return self._supports_image
 
     def get_chat_id(self, session_id: str) -> str | None:
@@ -69,7 +67,8 @@ class MockAgentManager:
     async def ensure_connection(self) -> None:
         pass
 
-    async def disconnect(self) -> None:
+    async def disconnect(self, chat_id: str | None = None) -> None:
+        """Disconnect specific chat or all chats (if chat_id is None)."""
         pass
 
     async def get_or_create_session(self, chat_id: str) -> str:

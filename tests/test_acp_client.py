@@ -26,7 +26,7 @@ def _tool_call(
 @pytest.fixture
 def client():
     """NcatAcpClient with a minimal agent manager (request_permission does not use it)."""
-    return NcatAcpClient(agent_manager=object())
+    return NcatAcpClient(agent_manager=object(), chat_id="test:123")
 
 
 async def test_request_permission_prefers_allow_always(client: NcatAcpClient) -> None:

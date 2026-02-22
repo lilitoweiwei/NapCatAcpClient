@@ -172,23 +172,34 @@ class NcatNapCatServer:
         needing the original event dict.
 
         Args:
-            chat_id: QQ chat ID (user_id for private, group_id for group)
+            chat_id: QQ chat ID in internal format: "private:{user_id}" or "group:{group_id}"
             text: Reply text
         """
-        # Determine if this is a private or group message based on chat_id format
-        # For simplicity, assume all numeric chat_ids are private messages
-        # In production, you might want to track chat types separately
-        try:
-            user_id = int(chat_id)
-            segments = ai_to_onebot(text)
-            resp = await self.send_api(
-                "send_private_msg",
-                {"user_id": user_id, "message": segments},
-            )
-            if resp and resp.get("retcode") != 0:
-                logger.warning("send_private_msg failed: %s", resp)
-        except ValueError:
-            logger.warning("Invalid chat_id for MQTT notification: %s", chat_id)
+        segments = ai_to_onebot(text)
+        if chat_id.startswith("private:"):
+            try:
+                user_id = int(chat_id.split(":", 1)[1])
+                resp = await self.send_api(
+                    "send_private_msg",
+                    {"user_id": user_id, "message": segments},
+                )
+                if resp and resp.get("retcode") != 0:
+                    logger.warning("send_private_msg failed: %s", resp)
+            except ValueError:
+                logger.warning("Invalid chat_id for MQTT notification: %s", chat_id)
+        elif chat_id.startswith("group:"):
+            try:
+                group_id = int(chat_id.split(":", 1)[1])
+                resp = await self.send_api(
+                    "send_group_msg",
+                    {"group_id": group_id, "message": segments},
+                )
+                if resp and resp.get("retcode") != 0:
+                    logger.warning("send_group_msg failed: %s", resp)
+            except ValueError:
+                logger.warning("Invalid chat_id for MQTT notification: %s", chat_id)
+        else:
+            logger.warning("Invalid chat_id for MQTT notification (expected private:X or group:X): %s", chat_id)
 
     async def _reply_text(self, event: dict, text: str) -> None:
         """Send a text reply back to the source of the message event."""

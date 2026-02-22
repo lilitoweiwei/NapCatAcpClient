@@ -106,13 +106,13 @@ class MqttSubscriber:
             topic: MQTT topic string
             payload: Parsed JSON payload
         """
-        # Parse topic: suzu/system/ncat/{chat_id}
+        # Parse topic: {prefix}/system/{frontend}/{chat_id} (e.g. suzu/system/ncat/private:123)
         parts = topic.split("/")
-        if len(parts) < 5:
+        if len(parts) < 4:
             logger.warning("Invalid MQTT topic format: %s", topic)
             return
 
-        chat_id = parts[4]
+        chat_id = parts[3]
         msg_type = payload.get("type")
 
         if msg_type == "bg_created":

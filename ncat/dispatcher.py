@@ -16,6 +16,10 @@ from ncat.converter import onebot_to_internal
 from ncat.models import ContentPart
 from ncat.prompt_runner import PromptRunner
 
+# Import bg_command to register /bg * commands (must be after command_registry is created)
+# This module has side effects: registers commands in command_registry
+from ncat import bg_command  # noqa: F401
+
 logger = logging.getLogger("ncat.dispatcher")
 
 # Type alias for the reply callback provided by the transport layer.

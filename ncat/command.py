@@ -9,10 +9,6 @@ import logging
 from ncat.agent_manager import AgentManager
 from ncat.command_system import CommandRegistry
 
-# Import bg_command to register /bg * commands
-# This module has side effects: it registers commands in command_registry
-from ncat import bg_command  # noqa: F401
-
 logger = logging.getLogger("ncat.command")
 
 # Create global command registry

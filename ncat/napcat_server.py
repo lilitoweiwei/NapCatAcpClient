@@ -123,7 +123,8 @@ class NcatNapCatServer:
             if meta_type == "lifecycle":
                 logger.info("Lifecycle event: sub_type=%s", event.get("sub_type"))
             elif meta_type == "heartbeat":
-                logger.debug("Heartbeat received")
+                # logger.debug("Heartbeat received")
+                pass
             else:
                 logger.debug("Unhandled meta event: %s", meta_type)
 

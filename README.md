@@ -24,7 +24,18 @@ cp config.example.toml config.toml
 
 # 编辑 config.toml 后启动
 uv run python main.py
+# 或指定配置文件路径（用于指定另一套配置及持久化数据位置）
+uv run python main.py /path/to/your.toml
 ```
+
+**持久化数据与存储位置**：ncat 运行过程中产生的持久化数据仅有 **日志文件** 和 **Agent 工作目录**（子进程可能在其中创建文件）。两者均可通过配置文件指定位置；通过命令行传入配置文件路径即可间接指定存储位置。
+
+| 数据 | 配置项 | 默认值 |
+|------|--------|--------|
+| 日志目录 | `[logging] dir` | `data/logs` |
+| Agent 工作目录 | `[agent] cwd` | `~/.ncat/workspace` |
+
+在 `config.toml` 中设置 `dir`、`cwd` 为绝对路径或相对路径（相对当前工作目录）；使用不同配置文件（如 `uv run python main.py /path/to/your.toml`）即可使用不同的数据目录。
 
 ncat 启动后先起 WebSocket 服务，**不**建立到 Agent 的连接；用户发送第一条需要 AI 的消息时会**先尝试建立连接**，再处理该条消息。若建连失败（如 FAG 未就绪），会收到提示：「Agent 未连接，请稍后再试。」（执行 `/new` 后下次发消息时同样会先尝试重连。）
 

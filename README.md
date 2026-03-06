@@ -1,14 +1,14 @@
 # ncat (NapCat ACP Client)
 
-一个 Python 桥接器，将 [NapCatQQ](https://github.com/NapNeko/NapCatQQ) 连接到任何支持 [ACP](https://agentclientprotocol.com/) 的 AI 智能体 —— 让你通过 QQ 与 AI 编程助手聊天。
+一个 Python 桥接器，将 [NapCatQQ](https://github.com/NapNeko/NapCatQQ) 连接到任何支持 [ACP](https://agentclientprotocol.com/) (Agent Client Protocol) 的 AI 智能体 —— 让你通过 QQ 与 AI 编程助手聊天。
 
 ## 工作原理
 
-ncat 作为一个 **ACP 客户端**：启动后不主动连接 Agent，仅在用户发送**第一条需要 AI 的消息**时建立到 Agent 网关（FAG）的连接，通过 FAG 与兼容 ACP 的智能体通信；来自 QQ（通过 NapCatQQ）的消息经 ncat 桥接到智能体。
+ncat 作为一个 **ACP 客户端**：启动后，它通过子进程直接唤起配置好的 ACP 智能体可执行文件，并通过标准输入输出（stdin/stdout）与之建立 ACP 连接；来自 QQ（通过 NapCatQQ）的消息经 ncat 桥接到智能体。
 
-```
-QQ 用户 → NapCat (反向 WS) → ncat →（按需连接）→ FAG → ACP 智能体
-QQ 用户 ← NapCat (反向 WS) ← ncat ← FAG ← ACP 智能体
+```text
+QQ 用户 → NapCat (反向 WS) → ncat →（子进程 stdin/stdout）→ ACP 智能体
+QQ 用户 ← NapCat (反向 WS) ← ncat ←（子进程 stdin/stdout）← ACP 智能体
 ```
 
 ## 快速启动
@@ -28,26 +28,45 @@ uv run python main.py
 uv run python main.py /path/to/your.toml
 ```
 
-**持久化数据与存储位置**：ncat 运行过程中产生的持久化数据仅有 **日志文件** 和 **Agent 工作目录**（子进程可能在其中创建文件）。两者均可通过配置文件指定位置；通过命令行传入配置文件路径即可间接指定存储位置。
+**核心配置说明**：
 
-| 数据 | 配置项 | 默认值 |
-|------|--------|--------|
-| 日志目录 | `[logging] dir` | `data/logs` |
-| Agent 工作目录 | `[agent] cwd` | `~/.ncat/workspace` |
+为了让程序正常跑起来，你必须在 `config.toml` 中配置你要启动的 Agent。
+打开 `config.toml`，找到 `[agent]` 块：
+- `command`: ACP Agent 的可执行文件路径或命令名（例如 `"claude"`）。
+- `args`: 传递给 Agent 的启动参数（例如 `["--experimental-acp"]`）。
 
-在 `config.toml` 中设置 `dir`、`cwd` 为绝对路径或相对路径（相对当前工作目录）；使用不同配置文件（如 `uv run python main.py /path/to/your.toml`）即可使用不同的数据目录。
+其他诸如日志目录、UX 体验优化、网络端口等丰富配置，请直接阅读 `config.example.toml` 中的注释，默认配置即可运行。
 
-ncat 启动后先起 WebSocket 服务，**不**建立到 Agent 的连接；用户发送第一条需要 AI 的消息时会**先尝试建立连接**，再处理该条消息。若建连失败（如 FAG 未就绪），会收到提示：「Agent 未连接，请稍后再试。」（执行 `/new` 后下次发消息时同样会先尝试重连。）
+**持久化数据**：ncat 运行过程中产生的持久化数据主要有日志文件和 Agent 工作目录。它们均可在 `config.toml` 中指定（`[logging] dir` 和 `[agent] cwd`）。
 
-**指令 `/new` 与工作目录**：`/new` 结束当前会话并**断开与 Agent 的连接**，下次发消息时再重新连接（全新 Agent）。新会话的工作目录由 **Agent 网关（FAG）** 的默认配置决定。`/new <dir>` 则指定新会话的工作目录为网关的 workspace 下的 `<dir>`（如 `/new projectA` 表示 `/workspace/projectA`，具体路径由网关配置）。该指定仅对紧接着的那一次建会话生效，不持久化。
+## 指令系统
 
-**可选配置**（`config.toml` 的 `[agent]` 下）：
-- `initialize_timeout_seconds`：首次建连或重连时 ACP Initialize 等待超时（秒），默认 30。
-- `retry_interval_seconds`：连接失败后，下次用户发消息时重试前的间隔（秒），默认 10。
+ncat 提供了一套完善的指令系统，你可以直接在 QQ 中向机器人发送以下指令。
 
-然后配置 NapCatQQ 连接到 ncat 的 WebSocket 服务器（默认：`ws://127.0.0.1:8282`）。
+### 基础指令
 
-若 Agent 在处理过程中发生错误（如流式输出中途失败），ncat 会先把**已生成的部分内容**原样发给用户，再发送错误说明并关闭当前会话，避免用户完全收不到回复。
+- `/new [dir]` - 结束当前会话并清空 AI 上下文，下次发消息时会创建新会话。可选的 `dir` 参数可用于临时指定新会话在被唤起时的子进程工作目录。
+- `/stop` - 中断当前 AI 思考。
+- `/send <text>` - 将文本原样转发给 agent（避免以 `/` 开头的文本误触发 ncat 指令）。
+- `/help` - 显示指令列表与帮助信息。
+
+### 后台会话指令 (Background Session)
+
+ncat 支持将耗时较长或需要后台独立运行的 Agent 任务放入后台会话。
+
+> **注意**：要使用后台会话功能，你必须在 `config.toml` 中开启并配置 `[bsp_server]` (Background Session Protocol Server) 和 `[mqtt]` (用于接收后台运行状态的异步推送通知)。
+
+- `/bg new <prompt>` - 创建一个后台会话并发送 prompt。
+- `/bg newn <name> <prompt>` - 创建一个指定名称的后台会话。
+- `/bg ls` - 列出所有后台会话及其运行状态。
+- `/bg to i <index> <prompt>` - 向指定编号的后台会话追加发送 prompt。
+- `/bg to n <name> <prompt>` - 向指定名称的后台会话追加发送 prompt。
+- `/bg stop i <index>` - 停止指定编号的后台会话。
+- `/bg stop n <name>` - 停止指定名称的后台会话。
+- `/bg stop wait` - 停止所有等待输入中的后台会话。
+- `/bg stop all` - 停止所有后台会话。
+- `/bg history i <index>` / `/bg history n <name>` - 查看指定会话的完整对话历史。
+- `/bg last i <index>` / `/bg last n <name>` - 查看指定会话的最后一条 AI 输出。
 
 ## 部署为系统服务 (Systemd)
 
@@ -64,14 +83,42 @@ sudo bash scripts/install-service.sh
 
 ## 架构与模块
 
-ncat 具备两个通信面：**NapCat 侧 (Server)** 接收 NapCatQQ 的 WebSocket（OneBot v11），**ACP 侧 (Client)** 以子进程方式启动 AI Agent，通过 stdin/stdout 进行 ACP (JSON-RPC 2.0) 通信。
+ncat 具备两个主要通信面：**NapCat 侧** 接收 NapCatQQ 的 WebSocket 事件，**ACP 侧** 以子进程方式启动 AI Agent，通过 stdin/stdout 进行 ACP (JSON-RPC 2.0) 通信。同时引入了对 BSP 后台任务和 MQTT 异步通知的支持。
 
-**模块一览**：`main.py` 入口；`ncat/napcat_server.py` 面向 NapCat 的传输层；`dispatcher.py` 消息分发（解析 → 过滤 → 路由）；`prompt_runner.py` 单次 prompt 生命周期（超时、发送、取消）；`command.py` 命令执行（/new、/stop、/help）；`agent_manager.py` 会话编排（chat_id ↔ session_id）；`agent_process.py` Agent 子进程与 ACP 连接；`acp_client.py` ACP 回调（session_update、request_permission 服务端一律批准）；`converter.py`、`prompt_builder.py`、`image_utils.py` 负责 OneBot 与 ACP 格式转换及图片下载；`config.py`、`log.py`、`models.py` 配置、日志与共享数据类型。
+```mermaid
+graph TD
+    User((QQ User)) <--> NapCat[NapCatQQ]
+    NapCat <-- WebSocket --> NcatServer[NcatNapCatServer]
+    
+    subgraph ncat
+        NcatServer --> Dispatcher[MessageDispatcher]
+        Dispatcher --> CommandSys[CommandRegistry]
+        Dispatcher --> PromptRunner[PromptRunner]
+        
+        PromptRunner --> AgentMgr[AgentManager]
+        
+        AgentMgr --> AgentConn[AgentConnection]
+        AgentConn --> AgentProc[AgentProcess]
+        AgentConn --> AcpClient[NcatAcpClient]
+        
+        AcpClient <--> AgentProc
+        
+        CommandSys --> BspClient[BspClient]
+        MqttSub[MqttSubscriber] --> Dispatcher
+    end
+    
+    AgentProc <-- stdio / ACP --> Agent((ACP Agent))
+    BspClient <-- HTTP --> BspServer((BSP Server))
+    MqttBroker((MQTT Broker)) -- Notifications --> MqttSub
+```
 
-**数据流概要**：NapCat 事件 → NcatNapCatServer 分发 → MessageDispatcher（解析、过滤、命令/忙碌检查）→ PromptRunner → AgentManager.send_prompt（映射会话、发 ACP、积累 ContentPart）→ 回复经 NcatAcpClient.session_update 回传 → 转 OneBot 段发回 NapCat。会话为内存映射，无持久化；/new 或 /new \<dir\> 清除映射并可选设置下次建会话的 cwd（用后即清），下次消息新建会话。
-
-## 路线图与待办
-
-**已完成**：项目更名为 ncat、后端切换为 ACP、移除 SQLite 持久化、System prompt 交由 Agent、即时通知、权限请求由服务端默认一律批准、/send 指令、AgentManager 独立、Image 支持等。
-
-**计划中**：agent→qq 分段发送（超时前先发已积累内容）；超时反馈机制改善；将 NapCat 能力暴露为 MCP server；Agent 崩溃后自动重启；更智能的群消息过滤；可配置的 context header。
+**核心模块一览**：
+- `main.py`：程序入口。
+- `napcat_server.py`：面向 NapCat 的 WebSocket 传输层。
+- `dispatcher.py`：消息分发、解析与过滤。
+- `command_system.py` / `command.py` / `bg_command.py`：统一的指令注册与路由系统，支持正则匹配与帮助文档生成。
+- `prompt_runner.py`：单次 prompt 生命周期管理（超时、发送、取消）。
+- `agent_manager.py`：会话编排与连接生命周期管理。
+- `agent_process.py` / `agent_connection.py`：Agent 子进程管理与底层 stdio 管道封装。
+- `acp_client.py`：ACP 协议的回调处理。
+- `bsp_client.py` / `mqtt_subscriber.py`：后台任务 HTTP 客户端与 MQTT 异步状态订阅。

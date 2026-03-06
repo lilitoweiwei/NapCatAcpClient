@@ -5,24 +5,19 @@ host = "0.0.0.0"
 port = 8282
 
 [agent]
-# Command to start the ACP agent (connect_agent.sh bridges stdio to FAG via socat).
-# In container use /app/agents/connect_agent.sh; on host use path to repo/agents.
-command = "/app/agents/connect_agent.sh"
-# Arguments for the agent command (--port must match FAG server port, e.g. 8765).
-args = ["--port", "8765", "--debug", "--log", "/app/core/log/ncat_socat_connect_fag.log"]
+# Command to start the ACP agent directly
+command = "/bin/bash"
+# Arguments for the agent command
+args = ["/app/agents/run_qwen_acp.sh"]
 # Working directory for the agent process.
 cwd = "/app/agents"
-# Timeout in seconds for ACP initialize; after timeout or failure, retry after retry_interval_seconds.
-# initialize_timeout_seconds = 300
-# Fixed interval in seconds between connection attempts.
-# retry_interval_seconds = 10
 
-# NapCat MCP (STDIO): use venv binary to avoid uv lock contention at runtime
-[[mcp]]
-name = "napcat_mcp"
-transport = "stdio"
-command = "/home/dev/.venv/bin/napcat-mcp"
-args = ["--transport", "stdio"]
+# NapCat MCP (STDIO): Currently shelved, commented out to prevent errors
+# [[mcp]]
+# name = "napcat_mcp"
+# transport = "stdio"
+# command = "uv"
+# args = ["run", "--project", "/app/NapCatMCP", "napcat-mcp", "--transport", "stdio"]
 
 # BSP server for background session management
 [bsp_server]

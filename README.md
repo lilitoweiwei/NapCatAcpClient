@@ -7,8 +7,8 @@
 ncat 作为一个 **ACP 客户端**：启动后，它通过子进程直接唤起配置好的 ACP 智能体可执行文件，并通过标准输入输出（stdin/stdout）与之建立 ACP 连接；来自 QQ（通过 NapCatQQ）的消息经 ncat 桥接到智能体。
 
 ```text
-QQ 用户 → NapCat (反向 WS) → ncat →（子进程 stdin/stdout）→ ACP 智能体
-QQ 用户 ← NapCat (反向 WS) ← ncat ←（子进程 stdin/stdout）← ACP 智能体
+QQ 用户 → NapCat (WebSocket 客户端) → ncat →（子进程 stdin/stdout）→ ACP 智能体
+QQ 用户 ← NapCat (WebSocket 客户端) ← ncat ←（子进程 stdin/stdout）← ACP 智能体
 ```
 
 ## 快速启动

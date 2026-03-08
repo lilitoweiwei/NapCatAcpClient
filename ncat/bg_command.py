@@ -5,7 +5,6 @@ regex patterns and handler functions.
 """
 
 import logging
-import re
 
 import httpx
 

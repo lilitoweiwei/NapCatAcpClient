@@ -8,7 +8,11 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from ncat.agent_manager import AgentErrorWithPartialContent, AgentManager, MSG_AGENT_NOT_CONNECTED
+from ncat.agent_manager import (
+    MSG_AGENT_NOT_CONNECTED,
+    AgentErrorWithPartialContent,
+    AgentManager,
+)
 from ncat.image_utils import download_image
 from ncat.models import ContentPart, ParsedMessage
 from ncat.prompt_builder import build_prompt_blocks
@@ -119,7 +123,12 @@ class PromptRunner:
 
         try:
             chat_id = parsed.chat_id
-            supports_image = getattr(self._agent_manager, "supports_image", lambda cid: False)(chat_id)
+            await self._agent_manager.ensure_connection(chat_id)
+            supports_image = getattr(
+                self._agent_manager,
+                "supports_image",
+                lambda cid: False,
+            )(chat_id)
             downloaded_images: list[tuple[str, str] | None] = []
             if supports_image:
                 # Download images before sending the prompt so we can attach ACP image blocks.
@@ -181,7 +190,9 @@ class PromptRunner:
                     await self._reply_content_fn(event, e.partial_parts)
                     await self._reply_fn(
                         event,
-                        f"Agent 发生错误，以上为已生成的部分内容。\n错误信息：{e.cause}\n当前会话已关闭，下次对话将自动开启新会话。",
+                        "Agent 发生错误，以上为已生成的部分内容。\n"
+                        f"错误信息：{e.cause}\n"
+                        "当前会话已关闭，下次对话将自动开启新会话。",
                     )
                 else:
                     await self._reply_fn(
@@ -204,7 +215,7 @@ class PromptRunner:
                 )
                 await self._agent_manager.close_session(chat_key)
 
-        except (TimeoutError, asyncio.TimeoutError) as e:
+        except TimeoutError as e:
             # ACP initialize or connection timed out (e.g. agent cold start > timeout)
             logger.error("Agent connection timeout for %s: %s", chat_key, e)
             await self._reply_fn(

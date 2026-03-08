@@ -200,7 +200,11 @@ class NcatNapCatServer:
             except ValueError:
                 logger.warning("Invalid chat_id for MQTT notification: %s", chat_id)
         else:
-            logger.warning("Invalid chat_id for MQTT notification (expected private:X or group:X): %s", chat_id)
+            logger.warning(
+                "Invalid chat_id for MQTT notification "
+                "(expected private:X or group:X): %s",
+                chat_id,
+            )
 
     async def _reply_text(self, event: dict, text: str) -> None:
         """Send a text reply back to the source of the message event."""

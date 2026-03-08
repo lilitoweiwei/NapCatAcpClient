@@ -34,6 +34,7 @@ async def handle_new(
     event: dict,
     reply_fn,
     agent_manager: AgentManager,
+    cancel_fn=None,
     **kwargs,
 ) -> None:
     """Handle /new and /new <workspace> commands.
@@ -50,6 +51,9 @@ async def handle_new(
     except ValueError as exc:
         await reply_fn(event, f"工作区无效：{exc}")
         return
+
+    if cancel_fn is not None:
+        cancel_fn(chat_id)
 
     # Close current ACP session and disconnect
     await agent_manager.close_session(chat_id)

@@ -62,6 +62,7 @@ async def test_process_sends_agent_reply() -> None:
     _, prompt = agent.calls[0]
     assert "[Private chat, user Alice(111)]" in prompt
     assert "hello" in prompt
+    assert agent.ensure_connection_calls == ["private:111"]
 
 
 async def test_process_empty_response_sends_warning() -> None:
@@ -100,6 +101,48 @@ async def test_process_runtime_error_closes_session_and_replies_error() -> None:
     assert "private:111" in agent.closed_sessions
 
 
+async def test_cancelled_request_does_not_close_session() -> None:
+    agent = MockAgentManager()
+    agent.delay = 5.0
+    replies = ReplyQueue()
+    runner = PromptRunner(
+        agent_manager=agent,
+        reply_fn=replies,
+        thinking_notify_seconds=0,
+        thinking_long_notify_seconds=0,
+    )
+
+    parsed = _parsed_private("private:111", 111, "Alice", "hello")
+    task = asyncio.create_task(runner.process(parsed, event={}))
+
+    for _ in range(200):
+        if runner.is_busy("private:111"):
+            break
+        await asyncio.sleep(0)
+
+    assert runner.cancel("private:111") is True
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert "private:111" not in agent.closed_sessions
+
+
+async def test_first_message_ensures_connection_before_image_capability_check() -> None:
+    agent = MockAgentManager()
+    replies = ReplyQueue()
+    runner = PromptRunner(
+        agent_manager=agent,
+        reply_fn=replies,
+        thinking_notify_seconds=0,
+        thinking_long_notify_seconds=0,
+    )
+
+    await runner.process(_parsed_private("private:111", 111, "Alice", "hello"), event={})
+
+    assert agent.ensure_connection_calls == ["private:111"]
+
+
 async def test_process_error_with_partial_sends_partial_then_error() -> None:
     """When agent raises with partial content, user gets partial reply then error message."""
     from ncat.models import ContentPart
@@ -129,8 +172,6 @@ async def test_process_error_with_partial_sends_partial_then_error() -> None:
 
 async def test_process_error_with_empty_partial_sends_only_error() -> None:
     """When agent raises with no partial content, user gets only the error message."""
-    from ncat.models import ContentPart
-
     agent = MockAgentManager()
     agent.raise_error_with_parts = (Exception("Stream failed"), [])
     replies = ReplyQueue()

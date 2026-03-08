@@ -2,7 +2,7 @@
 
 This module contains `AgentManager`, which manages multiple independent ACP
 connections (one per QQ chat), orchestrates prompt sending/cancellation, and
-accumulates response content from session_update notifications.
+tracks both the long-lived ACP session and the current prompt turn state.
 
 Each chat has its own AgentConnection containing an AgentProcess and NcatAcpClient.
 Protocol callbacks (e.g. `session_update`, `request_permission`) are implemented
@@ -43,7 +43,8 @@ class AgentManager:
 
     Responsibilities:
     - Map chat_id to independent AgentConnection (one per chat)
-    - Accumulate response content from session_update notifications
+    - Persist one ACP session per chat until /new or a hard error
+    - Accumulate streamed response content for the active prompt turn only
     - Send prompts and return complete responses
     - Handle cancellation via session/cancel
     - Delegate subprocess lifecycle to AgentProcess (via AgentConnection)
@@ -130,7 +131,6 @@ class AgentManager:
                 chat_id=chat_id,
                 acp_client=acp_client,
                 agent_process=agent_process,
-                accumulators={},
                 workspace_cwd=workspace_cwd,
             )
             self._connections[chat_id] = connection
@@ -163,6 +163,10 @@ class AgentManager:
             if conn.is_running:
                 return
 
+            conn.active_session_id = None
+            conn.active_turn_session_id = None
+            conn.turn_accumulator.clear()
+            conn.active_prompt = False
             conn.workspace_cwd = self._get_connection_cwd(chat_id)
             Path(conn.workspace_cwd).mkdir(parents=True, exist_ok=True)
             conn.agent_process.set_cwd(conn.workspace_cwd)
@@ -189,7 +193,9 @@ class AgentManager:
             conn = self._connections.pop(chat_id, None)
             if conn:
                 await conn.agent_process.stop()
-                conn.accumulators.clear()
+                conn.active_session_id = None
+                conn.active_turn_session_id = None
+                conn.turn_accumulator.clear()
                 conn.active_prompt = False
                 logger.info("Agent disconnected for chat %s", chat_id)
         else:
@@ -198,7 +204,9 @@ class AgentManager:
             for cid in chat_ids:
                 conn = self._connections[cid]
                 await conn.agent_process.stop()
-                conn.accumulators.clear()
+                conn.active_session_id = None
+                conn.active_turn_session_id = None
+                conn.turn_accumulator.clear()
                 conn.active_prompt = False
             self._connections.clear()
             logger.info("All agent connections closed")
@@ -223,15 +231,11 @@ class AgentManager:
         """Get existing ACP session for chat_id, or create a new one.
 
         Returns the ACP session_id.
-        In the multi-connection design, each chat has its own connection,
-        so we always create a new session if the connection doesn't have one.
+        Each chat reuses a single ACP session until /new or a hard error clears it.
         """
         conn = self._get_or_create_connection(chat_id)
-        # Check if connection already has an active session (has accumulators)
-        if conn.accumulators:
-            # Return existing session_id
-            session_id = next(iter(conn.accumulators.keys()))
-            return session_id
+        if conn.active_session_id is not None:
+            return conn.active_session_id
 
         return await self._create_session(chat_id)
 
@@ -246,7 +250,11 @@ class AgentManager:
         if acp_conn is None:
             raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
 
-        cwd = self._next_session_cwd.pop(chat_id, None) or self._default_workspace_path
+        cwd = (
+            self._next_session_cwd.pop(chat_id, None)
+            or conn.workspace_cwd
+            or self._default_workspace_path
+        )
         Path(cwd).mkdir(parents=True, exist_ok=True)
         conn.workspace_cwd = cwd
         conn.agent_process.set_cwd(cwd)
@@ -292,20 +300,25 @@ class AgentManager:
             mcp_servers=mcp_servers_payload,
         )
         session_id = session.session_id
-        conn.accumulators[session_id] = []
+        conn.active_session_id = session_id
+        conn.active_turn_session_id = None
+        conn.turn_accumulator.clear()
         logger.info("Created ACP session %s for chat %s", session_id, chat_id)
         return session_id
 
     async def close_session(self, chat_id: str) -> None:
-        """Close and remove the ACP session for a chat.
+        """Forget the active ACP session for a chat.
 
-        ACP has no explicit session close; we simply remove the mapping
-        so a new session will be created on next interaction.
+        ACP has no explicit session close in the currently used API surface.
+        ncat therefore stops referencing the old session locally so that the
+        next interaction creates a fresh session.
         """
         conn = self._connections.get(chat_id)
         if conn:
-            # Clean up any pending accumulator
-            conn.accumulators.clear()
+            conn.active_session_id = None
+            conn.active_turn_session_id = None
+            conn.turn_accumulator.clear()
+            conn.active_prompt = False
             logger.info("Closed session for chat %s", chat_id)
 
     async def close_all_sessions(self) -> None:
@@ -318,14 +331,19 @@ class AgentManager:
     # --- Content accumulation (called by NcatAcpClient.session_update) ---
 
     def accumulate_part(self, chat_id: str, session_id: str, part: ContentPart) -> None:
-        """Accumulate a content part for a session.
+        """Accumulate a content part for the current prompt turn.
 
         Called from NcatAcpClient.session_update callback.
-        Uses chat_id to locate the correct AgentConnection.
+        Uses chat_id to locate the correct AgentConnection and only records
+        updates that belong to the active turn.
         """
         conn = self._connections.get(chat_id)
-        if conn and session_id in conn.accumulators:
-            conn.accumulators[session_id].append(part)
+        if (
+            conn
+            and conn.active_prompt
+            and conn.active_turn_session_id == session_id
+        ):
+            conn.turn_accumulator.append(part)
 
     # --- Prompt sending ---
 
@@ -353,8 +371,9 @@ class AgentManager:
         # Get or create session
         session_id = await self.get_or_create_session(chat_id)
 
-        # Initialize content accumulator for this session
-        conn.accumulators[session_id] = []
+        # Initialize turn-level state
+        conn.turn_accumulator.clear()
+        conn.active_turn_session_id = session_id
         conn.active_prompt = True
 
         try:
@@ -366,8 +385,8 @@ class AgentManager:
                 prompt=list(prompt),
             )
 
-            # Collect accumulated content
-            parts = conn.accumulators.pop(session_id, [])
+            # Collect accumulated content for this turn only.
+            parts = list(conn.turn_accumulator)
             text_len = sum(len(p.text) for p in parts if p.type == "text")
 
             logger.info(
@@ -381,16 +400,16 @@ class AgentManager:
             return parts
 
         except asyncio.CancelledError:
-            # Clean up accumulator on cancellation
-            conn.accumulators.pop(session_id, None)
             raise
 
         except Exception as e:
             # Propagate partial content so the user can see what was already streamed
-            partial_parts = conn.accumulators.pop(session_id, [])
+            partial_parts = list(conn.turn_accumulator)
             raise AgentErrorWithPartialContent(e, partial_parts) from e
 
         finally:
+            conn.turn_accumulator.clear()
+            conn.active_turn_session_id = None
             conn.active_prompt = False
 
     # --- Cancellation ---
@@ -412,12 +431,7 @@ class AgentManager:
         if not conn.active_prompt:
             return False
 
-        # Find session_id for this chat
-        session_id = None
-        for sid in conn.accumulators:
-            session_id = sid
-            break
-
+        session_id = conn.active_turn_session_id
         if session_id is None:
             return False
 

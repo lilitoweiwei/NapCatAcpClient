@@ -34,6 +34,7 @@ async def test_new_command_sets_workspace_and_replies() -> None:
     assert replies.texts == ["已创建新会话，AI 上下文已清空。"]
     assert agent.next_session_cwds["private:1"] == "demo"
     assert "private:1" in agent.closed_sessions
+    assert agent.disconnect_calls == ["private:1"]
 
 
 async def test_new_command_without_workspace_keeps_default_selection() -> None:
@@ -51,6 +52,26 @@ async def test_new_command_without_workspace_keeps_default_selection() -> None:
     assert matched is True
     assert replies.texts == ["已创建新会话，AI 上下文已清空。"]
     assert agent.next_session_cwds["private:1"] is None
+    assert agent.disconnect_calls == ["private:1"]
+
+
+async def test_new_command_cancels_active_turn_before_disconnect() -> None:
+    replies = ReplyCollector()
+    agent = MockAgentManager()
+    cancelled: list[str] = []
+
+    matched = await command_registry.execute(
+        "/new demo",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+        agent_manager=agent,
+        cancel_fn=lambda chat_id: cancelled.append(chat_id) or True,
+    )
+
+    assert matched is True
+    assert cancelled == ["private:1"]
+    assert agent.disconnect_calls == ["private:1"]
 
 
 async def test_new_command_reports_workspace_validation_errors() -> None:

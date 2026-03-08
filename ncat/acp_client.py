@@ -104,7 +104,12 @@ class NcatAcpClient(Client):
                     ),
                 )
         elif isinstance(update, (ToolCallStart, ToolCallProgress)):
-            logger.debug("Tool call update for session %s (chat %s): %s", session_id, self._chat_id, type(update).__name__)
+            logger.debug(
+                "Tool call update for session %s (chat %s): %s",
+                session_id,
+                self._chat_id,
+                type(update).__name__,
+            )
         elif isinstance(update, AgentPlanUpdate):
             logger.debug("Agent plan update for session %s (chat %s)", session_id, self._chat_id)
 
@@ -115,7 +120,10 @@ class NcatAcpClient(Client):
         tool_call: ToolCallUpdate,
         **kwargs: Any,
     ) -> RequestPermissionResponse:
-        """Auto-approve permission requests: prefer allow_always, then allow_once, else first option."""
+        """Auto-approve permission requests.
+
+        Prefer allow_always, then allow_once, otherwise fall back to the first option.
+        """
         if not options:
             return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
         selected = None

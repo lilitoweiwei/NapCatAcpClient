@@ -112,6 +112,7 @@ async def test_private_message_calls_agent(handler_env) -> None:
     assert len(mock_agent.calls) == 1
     assert "hello" in mock_agent.calls[0][1]
     assert replies.last_text == "Mock AI response"
+    assert mock_agent.ensure_connection_calls == ["private:111"]
 
 
 async def test_group_without_at_ignored(handler_env) -> None:
@@ -140,7 +141,7 @@ async def test_group_with_at_processed(handler_env) -> None:
 async def test_agent_not_connected_message_reply(handler_env) -> None:
     """Test that when agent is not connected, a normal message gets MSG_AGENT_NOT_CONNECTED."""
     handler, mock_agent, replies = handler_env
-    mock_agent._is_running = False
+    mock_agent.ensure_connection_error = RuntimeError(MSG_AGENT_NOT_CONNECTED)
 
     await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
     assert replies.last_text == MSG_AGENT_NOT_CONNECTED
@@ -165,6 +166,7 @@ async def test_command_new_closes_session(handler_env) -> None:
     await handler.handle_message(_private_event(111, "A", "/new"), BOT_ID)
     assert "新会话" in replies.last_text
     assert "private:111" in mock_agent.closed_sessions
+    assert mock_agent.disconnect_calls == ["private:111"]
 
 
 async def test_command_new_invalid_workspace(handler_env) -> None:
@@ -317,6 +319,57 @@ async def test_stop_cancels_active_task(timeout_env) -> None:
 
     assert ai_task.cancelled()
     assert any("已中断" in text for text in replies.texts)
+
+
+async def test_same_chat_reuses_session_without_new(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "Alice", "hello"), BOT_ID)
+    await handler.handle_message(_private_event(111, "Alice", "again"), BOT_ID)
+
+    assert len(mock_agent.new_session_calls) == 1
+    assert mock_agent.prompt_session_ids == [
+        ("private:111", mock_agent.prompt_session_ids[0][1]),
+        ("private:111", mock_agent.prompt_session_ids[0][1]),
+    ]
+    assert replies.texts.count("Mock AI response") == 2
+
+
+async def test_stop_does_not_force_new_session_on_next_prompt(timeout_env) -> None:
+    handler, mock_agent, replies = timeout_env
+    mock_agent.delay = 5.0
+
+    task = asyncio.create_task(handler.handle_message(_private_event(111, "A", "first"), BOT_ID))
+    await asyncio.sleep(0.05)
+    first_session_id = mock_agent.prompt_session_ids[0][1]
+
+    await handler.handle_message(_private_event(111, "A", "/stop"), BOT_ID)
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert mock_agent.prompt_session_ids
+    mock_agent.delay = 0
+    await handler.handle_message(_private_event(111, "A", "second"), BOT_ID)
+
+    assert mock_agent.prompt_session_ids[-1] == ("private:111", first_session_id)
+    assert "private:111" not in mock_agent.closed_sessions
+
+
+async def test_new_forces_new_session_after_next_message(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
+    first_session_id = mock_agent.prompt_session_ids[-1][1]
+
+    await handler.handle_message(_private_event(111, "A", "/new alt"), BOT_ID)
+    await handler.handle_message(_private_event(111, "A", "hello again"), BOT_ID)
+    second_session_id = mock_agent.prompt_session_ids[-1][1]
+
+    assert first_session_id != second_session_id
+    assert mock_agent.new_session_calls == [
+        ("private:111", None),
+        ("private:111", "alt"),
+    ]
 
 
 # --- Busy rejection tests ---

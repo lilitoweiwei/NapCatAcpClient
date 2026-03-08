@@ -200,6 +200,59 @@ async def test_new_command_closes_session(full_stack) -> None:
     assert "private:555" in mock_agent.closed_sessions
 
 
+async def test_same_chat_reuses_session_without_new(full_stack) -> None:
+    _, mock, mock_agent = full_stack
+
+    await mock.send_private_message(111, "Alice", "hello")
+    await mock.recv_api_call(timeout=5.0)
+    first_session_id = mock_agent.prompt_session_ids[-1][1]
+
+    await mock.send_private_message(111, "Alice", "again")
+    await mock.recv_api_call(timeout=5.0)
+
+    assert len(mock_agent.new_session_calls) == 1
+    assert mock_agent.prompt_session_ids[-1] == ("private:111", first_session_id)
+
+
+async def test_stop_keeps_same_session_for_next_prompt(full_stack) -> None:
+    _, mock, mock_agent = full_stack
+    mock_agent.delay = 5.0
+
+    await mock.send_private_message(111, "Alice", "first")
+    await asyncio.sleep(0.2)
+    first_session_id = mock_agent.prompt_session_ids[-1][1]
+
+    await mock.send_private_message(111, "Alice", "/stop")
+    stop_call = await mock.recv_api_call(timeout=3.0)
+    assert stop_call is not None
+    assert "已中断" in stop_call["params"]["message"][0]["data"]["text"]
+
+    mock_agent.delay = 0
+    await mock.send_private_message(111, "Alice", "second")
+    await mock.recv_api_call(timeout=5.0)
+
+    assert mock_agent.prompt_session_ids[-1] == ("private:111", first_session_id)
+
+
+async def test_new_forces_new_session_after_next_message(full_stack) -> None:
+    _, mock, mock_agent = full_stack
+
+    await mock.send_private_message(111, "Alice", "hello")
+    await mock.recv_api_call(timeout=5.0)
+    first_session_id = mock_agent.prompt_session_ids[-1][1]
+
+    await mock.send_private_message(111, "Alice", "/new alt")
+    new_call = await mock.recv_api_call(timeout=3.0)
+    assert new_call is not None
+    assert "新会话" in new_call["params"]["message"][0]["data"]["text"]
+
+    await mock.send_private_message(111, "Alice", "hello again")
+    await mock.recv_api_call(timeout=5.0)
+    second_session_id = mock_agent.prompt_session_ids[-1][1]
+
+    assert first_session_id != second_session_id
+
+
 async def test_multiple_users_isolated(full_stack) -> None:
     """Test that different users get separate agent calls."""
     server, mock, mock_agent = full_stack

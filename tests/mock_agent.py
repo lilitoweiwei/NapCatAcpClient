@@ -34,8 +34,10 @@ class MockAgentManager:
         self.delay: float = 0
         # Chat IDs that have been cancelled
         self.cancelled: set[str] = set()
+        self.cancel_calls: list[str] = []
         # Chat IDs whose sessions have been closed
         self.closed_sessions: set[str] = set()
+        self.disconnect_calls: list[str | None] = []
         # Whether all sessions have been closed
         self.all_sessions_closed: bool = False
         # Whether send_prompt should raise RuntimeError (simulates agent crash)
@@ -44,10 +46,18 @@ class MockAgentManager:
         self.raise_error_with_parts: tuple[BaseException, list[ContentPart]] | None = None
         # Whether agent is connected (False simulates "agent not connected")
         self._is_running: bool = True
+        self.ensure_connection_error: BaseException | None = None
         # Agent capability flag (mirrors real AgentManager.supports_image)
         self._supports_image: bool = False
         # One-shot workspace selected by /new for the next session
         self.next_session_cwds: dict[str, str | None] = {}
+        # Connection establishment bookkeeping
+        self.ensure_connection_calls: list[str] = []
+        # Session lifecycle bookkeeping
+        self._session_counter: int = 0
+        self.session_ids_by_chat: dict[str, str] = {}
+        self.new_session_calls: list[tuple[str, str | None]] = []
+        self.prompt_session_ids: list[tuple[str, str]] = []
 
     def is_running(self, chat_id: str) -> bool:
         return self._is_running
@@ -57,10 +67,11 @@ class MockAgentManager:
 
     def get_chat_id(self, session_id: str) -> str | None:
         """Reverse lookup (mock): extract chat_id from mock session_id format."""
-        # Mock session IDs have the format "mock_session_{chat_id}"
         prefix = "mock_session_"
         if session_id.startswith(prefix):
-            return session_id[len(prefix) :]
+            parts = session_id.split("_", 2)
+            if len(parts) == 3:
+                return parts[2]
         return None
 
     async def start(self) -> None:
@@ -69,15 +80,28 @@ class MockAgentManager:
     async def stop(self) -> None:
         pass
 
-    async def ensure_connection(self) -> None:
-        pass
+    async def ensure_connection(self, chat_id: str) -> None:
+        self.ensure_connection_calls.append(chat_id)
+        if self.ensure_connection_error is not None:
+            raise self.ensure_connection_error
+        self._is_running = True
 
     async def disconnect(self, chat_id: str | None = None) -> None:
         """Disconnect specific chat or all chats (if chat_id is None)."""
-        pass
+        self.disconnect_calls.append(chat_id)
+        if chat_id is None:
+            self.session_ids_by_chat.clear()
+        else:
+            self.session_ids_by_chat.pop(chat_id, None)
 
     async def get_or_create_session(self, chat_id: str) -> str:
-        return f"mock_session_{chat_id}"
+        session_id = self.session_ids_by_chat.get(chat_id)
+        if session_id is None:
+            self._session_counter += 1
+            session_id = f"mock_session_{self._session_counter}_{chat_id}"
+            self.session_ids_by_chat[chat_id] = session_id
+            self.new_session_calls.append((chat_id, self.next_session_cwds.get(chat_id)))
+        return session_id
 
     def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
         """Record the requested workspace for the next session."""
@@ -85,6 +109,7 @@ class MockAgentManager:
 
     async def close_session(self, chat_id: str) -> None:
         self.closed_sessions.add(chat_id)
+        self.session_ids_by_chat.pop(chat_id, None)
 
     async def close_all_sessions(self) -> None:
         self.all_sessions_closed = True
@@ -100,6 +125,8 @@ class MockAgentManager:
         """Simulate sending a prompt. Records call, waits for delay, returns response."""
         if not self._is_running:
             raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
+        session_id = await self.get_or_create_session(chat_id)
+        self.prompt_session_ids.append((chat_id, session_id))
         text = prompt if isinstance(prompt, str) else ""
         if isinstance(prompt, list):
             self.calls_blocks.append((chat_id, prompt))
@@ -122,4 +149,5 @@ class MockAgentManager:
 
     async def cancel(self, chat_id: str) -> bool:
         self.cancelled.add(chat_id)
+        self.cancel_calls.append(chat_id)
         return True

@@ -1,50 +1,176 @@
-"""Tests for the command parser module."""
+"""Tests for the unified command registry and handlers."""
 
-from ncat.command import parse_command, parse_new_dir
+import pytest
 
+from ncat.command import command_registry, get_help_text
+from tests.mock_agent import MockAgentManager
 
-def test_parse_command_new() -> None:
-    assert parse_command("/new") == "new"
-    assert parse_command("/NEW") == "new"
-    assert parse_command("/new extra args") == "new"
-
-
-def test_parse_command_stop() -> None:
-    assert parse_command("/stop") == "stop"
-    assert parse_command("/STOP") == "stop"
-    assert parse_command("/stop now") == "stop"
+pytestmark = pytest.mark.asyncio
 
 
-def test_parse_command_help() -> None:
-    assert parse_command("/help") == "help"
+class ReplyCollector:
+    """Collect reply texts emitted by command handlers."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    async def __call__(self, event: dict, text: str) -> None:
+        self.texts.append(text)
 
 
-def test_parse_command_unknown() -> None:
-    assert parse_command("/foo") == "unknown"
-    assert parse_command("/") == "unknown"
+async def test_new_command_sets_workspace_and_replies() -> None:
+    replies = ReplyCollector()
+    agent = MockAgentManager()
+
+    matched = await command_registry.execute(
+        "/new demo",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+        agent_manager=agent,
+    )
+
+    assert matched is True
+    assert replies.texts == ["已创建新会话，AI 上下文已清空。"]
+    assert agent.next_session_cwds["private:1"] == "demo"
+    assert "private:1" in agent.closed_sessions
 
 
-def test_parse_command_not_command() -> None:
-    assert parse_command("hello") is None
-    assert parse_command("not a /command") is None
-    assert parse_command("") is None
+async def test_new_command_without_workspace_keeps_default_selection() -> None:
+    replies = ReplyCollector()
+    agent = MockAgentManager()
+
+    matched = await command_registry.execute(
+        "/new",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+        agent_manager=agent,
+    )
+
+    assert matched is True
+    assert replies.texts == ["已创建新会话，AI 上下文已清空。"]
+    assert agent.next_session_cwds["private:1"] is None
 
 
-def test_parse_new_dir_no_dir() -> None:
-    assert parse_new_dir("/new") is None
-    assert parse_new_dir("/NEW") is None
-    assert parse_new_dir("/new   ") is None
-    assert parse_new_dir("/new  \t  ") is None
+async def test_new_command_reports_workspace_validation_errors() -> None:
+    replies = ReplyCollector()
+    agent = MockAgentManager()
+
+    def _raise(chat_id: str, dir_or_none: str | None) -> None:
+        raise ValueError("工作区名称不能逃逸出 workspace_root。")
+
+    agent.set_next_session_cwd = _raise
+
+    matched = await command_registry.execute(
+        "/new ../bad",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+        agent_manager=agent,
+    )
+
+    assert matched is True
+    assert replies.texts == ["工作区无效：工作区名称不能逃逸出 workspace_root。"]
+    assert "private:1" not in agent.closed_sessions
 
 
-def test_parse_new_dir_with_dir() -> None:
-    assert parse_new_dir("/new projectA") == "projectA"
-    assert parse_new_dir("/new a/b") == "a/b"
-    assert parse_new_dir("/new  projectA") == "projectA"
-    assert parse_new_dir("/new projectA extra") == "projectA extra"
+async def test_stop_command_replies_when_cancelled() -> None:
+    replies = ReplyCollector()
+
+    matched = await command_registry.execute(
+        "/stop",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+        cancel_fn=lambda chat_id: True,
+    )
+
+    assert matched is True
+    assert replies.texts == ["已中断当前 AI 思考。"]
 
 
-def test_parse_new_dir_not_new() -> None:
-    assert parse_new_dir("/stop") is None
-    assert parse_new_dir("hello") is None
-    assert parse_new_dir("") is None
+async def test_stop_command_replies_when_idle() -> None:
+    replies = ReplyCollector()
+
+    matched = await command_registry.execute(
+        "/stop",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+        cancel_fn=lambda chat_id: False,
+    )
+
+    assert matched is True
+    assert replies.texts == ["当前没有进行中的 AI 思考。"]
+
+
+async def test_send_command_forwards_body_verbatim() -> None:
+    replies = ReplyCollector()
+
+    matched = await command_registry.execute(
+        "/send /help",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+    )
+
+    assert matched is True
+    assert replies.texts == ["/help"]
+
+
+async def test_send_command_without_payload_returns_help() -> None:
+    replies = ReplyCollector()
+
+    matched = await command_registry.execute(
+        "/send",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+    )
+
+    assert matched is True
+    assert len(replies.texts) == 1
+    assert "/send <text>" in replies.texts[0]
+
+
+async def test_help_command_returns_generated_help() -> None:
+    replies = ReplyCollector()
+
+    matched = await command_registry.execute(
+        "/help",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+    )
+
+    assert matched is True
+    assert replies.texts == [get_help_text()]
+
+
+async def test_unknown_command_is_not_matched() -> None:
+    replies = ReplyCollector()
+
+    matched = await command_registry.execute(
+        "/unknown",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+    )
+
+    assert matched is False
+    assert replies.texts == []
+
+
+async def test_non_command_text_is_not_matched() -> None:
+    replies = ReplyCollector()
+
+    matched = await command_registry.execute(
+        "hello",
+        chat_id="private:1",
+        event={},
+        reply_fn=replies,
+    )
+
+    assert matched is False
+    assert replies.texts == []

@@ -148,13 +148,14 @@ async def test_agent_not_connected_message_reply(handler_env) -> None:
 
 
 async def test_agent_not_connected_new_reply(handler_env) -> None:
-    """Test that when agent is not connected, /new still succeeds (records cwd, closes session, disconnects)."""
+    """Test that when agent is not connected, /new still succeeds and records workspace state."""
     handler, mock_agent, replies = handler_env
     mock_agent._is_running = False
 
     await handler.handle_message(_private_event(111, "A", "/new"), BOT_ID)
     assert "新会话" in replies.last_text
     assert "private:111" in mock_agent.closed_sessions
+    assert mock_agent.next_session_cwds["private:111"] is None
 
 
 async def test_command_new_closes_session(handler_env) -> None:
@@ -164,6 +165,21 @@ async def test_command_new_closes_session(handler_env) -> None:
     await handler.handle_message(_private_event(111, "A", "/new"), BOT_ID)
     assert "新会话" in replies.last_text
     assert "private:111" in mock_agent.closed_sessions
+
+
+async def test_command_new_invalid_workspace(handler_env) -> None:
+    """Test /new reports validation errors from the agent manager."""
+    handler, mock_agent, replies = handler_env
+
+    def _fail(chat_id: str, dir_or_none: str | None) -> None:
+        raise ValueError("工作区名称不能逃逸出 workspace_root。")
+
+    mock_agent.set_next_session_cwd = _fail
+
+    await handler.handle_message(_private_event(111, "A", "/new ../bad"), BOT_ID)
+
+    assert replies.last_text == "工作区无效：工作区名称不能逃逸出 workspace_root。"
+    assert "private:111" not in mock_agent.closed_sessions
 
 
 async def test_command_help(handler_env) -> None:

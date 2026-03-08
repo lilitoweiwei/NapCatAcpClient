@@ -29,6 +29,7 @@ class AgentConnection:
     agent_process: AgentProcess
     accumulators: dict[str, list[ContentPart]] = field(default_factory=dict)
     active_prompt: bool = False
+    workspace_cwd: str | None = None
 
     @property
     def is_running(self) -> bool:

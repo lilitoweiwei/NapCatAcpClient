@@ -25,7 +25,7 @@ _MSG_HELP = "直接发送文字即可与 AI 对话。"
 
 @command_registry.register(
     pattern=r"^/new(?:\s+(?P<dir>\S+))?$",
-    help_text="/new [dir] - 创建新会话（工作目录由 Agent 网关默认配置决定）",
+    help_text="/new [workspace] - 创建新会话并切换到指定工作区",
     name="new",
 )
 async def handle_new(
@@ -34,24 +34,29 @@ async def handle_new(
     event: dict,
     reply_fn,
     agent_manager: AgentManager,
+    **kwargs,
 ) -> None:
-    """Handle /new and /new <dir> commands.
+    """Handle /new and /new <workspace> commands.
 
     Args:
         chat_id: QQ chat ID
-        dir: Optional workspace directory name
+        dir: Optional workspace name
         event: Raw event dict
         reply_fn: Callback to send reply
         agent_manager: Agent manager instance
     """
-    # Set one-time cwd for next session
-    agent_manager.set_next_session_cwd(chat_id, dir)
+    try:
+        agent_manager.set_next_session_cwd(chat_id, dir)
+    except ValueError as exc:
+        await reply_fn(event, f"工作区无效：{exc}")
+        return
+
     # Close current ACP session and disconnect
     await agent_manager.close_session(chat_id)
     await agent_manager.disconnect(chat_id)
     await reply_fn(event, _MSG_NEW_SESSION)
     logger.info(
-        "New session will be created for %s on next message (cwd dir=%s)",
+        "New session will be created for %s on next message (workspace=%s)",
         chat_id,
         dir,
     )
@@ -67,6 +72,7 @@ async def handle_stop(
     event: dict,
     reply_fn,
     cancel_fn,
+    **kwargs,
 ) -> None:
     """Handle /stop command.
 
@@ -102,8 +108,7 @@ async def handle_send(
         **kwargs: Additional dependencies (ignored for this command)
     """
     if not body:
-        # /send with no payload - will be handled by dispatcher
-        pass
+        await reply_fn(event, get_help_text())
     else:
         await reply_fn(event, body)
 

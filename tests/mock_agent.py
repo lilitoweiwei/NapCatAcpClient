@@ -8,7 +8,10 @@ spawning a real ACP agent subprocess.
 import asyncio
 from typing import Any
 
-from ncat.agent_manager import AgentErrorWithPartialContent, MSG_AGENT_NOT_CONNECTED
+from ncat.agent_manager import (
+    MSG_AGENT_NOT_CONNECTED,
+    AgentErrorWithPartialContent,
+)
 from ncat.models import ContentPart
 
 
@@ -43,6 +46,8 @@ class MockAgentManager:
         self._is_running: bool = True
         # Agent capability flag (mirrors real AgentManager.supports_image)
         self._supports_image: bool = False
+        # One-shot workspace selected by /new for the next session
+        self.next_session_cwds: dict[str, str | None] = {}
 
     def is_running(self, chat_id: str) -> bool:
         return self._is_running
@@ -75,8 +80,8 @@ class MockAgentManager:
         return f"mock_session_{chat_id}"
 
     def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
-        """No-op for mock; real AgentManager uses this for /new [<dir>]."""
-        pass
+        """Record the requested workspace for the next session."""
+        self.next_session_cwds[chat_id] = dir_or_none
 
     async def close_session(self, chat_id: str) -> None:
         self.closed_sessions.add(chat_id)

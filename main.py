@@ -24,10 +24,13 @@ async def main() -> None:
     setup_logging(config.logging)
     logger.info("ncat starting up (config: %s)", config_path)
 
-    # Ensure agent working directory exists
-    cwd = Path(config.agent.cwd).expanduser().resolve()
-    cwd.mkdir(parents=True, exist_ok=True)
-    logger.info("Agent working directory: %s", cwd)
+    # Ensure workspace directories exist
+    workspace_root = Path(config.agent.workspace_root).expanduser().resolve()
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    default_workspace = workspace_root / config.agent.default_workspace
+    default_workspace.mkdir(parents=True, exist_ok=True)
+    logger.info("Workspace root: %s", workspace_root)
+    logger.info("Default workspace: %s", default_workspace)
 
     # Initialize BSP client for background session management
     bsp_client = None
@@ -55,7 +58,8 @@ async def main() -> None:
     agent_manager = AgentManager(
         command=config.agent.command,
         args=config.agent.args,
-        cwd=str(cwd),
+        workspace_root=str(workspace_root),
+        default_workspace=config.agent.default_workspace,
         env=config.agent.env or None,
         mcp_servers=config.mcp,
         initialize_timeout_seconds=config.agent.initialize_timeout_seconds,

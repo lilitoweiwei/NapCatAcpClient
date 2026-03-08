@@ -12,6 +12,7 @@ by `ncat.acp_client.NcatAcpClient`.
 import asyncio
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 
 from ncat.acp_client import NcatAcpClient
 from ncat.agent_connection import AgentConnection
@@ -52,7 +53,8 @@ class AgentManager:
         self,
         command: str,
         args: list[str],
-        cwd: str,
+        workspace_root: str,
+        default_workspace: str,
         env: dict[str, str] | None = None,
         mcp_servers: list[McpServerConfig] | None = None,
         initialize_timeout_seconds: float = 30.0,
@@ -60,7 +62,9 @@ class AgentManager:
     ) -> None:
         self._command = command
         self._args = args
-        self._cwd = cwd
+        self._workspace_root = Path(workspace_root).expanduser().resolve()
+        self._default_workspace = default_workspace
+        self._default_workspace_path = self._resolve_workspace_path(default_workspace)
         self._env = env
         self._initialize_timeout_seconds = initialize_timeout_seconds
         self._retry_interval_seconds = retry_interval_seconds
@@ -69,10 +73,8 @@ class AgentManager:
         # Multi-connection management: chat_id -> AgentConnection
         self._connections: dict[str, AgentConnection] = {}
 
-        # One-time cwd for the next session creation only (plan: /new [<dir>]).
-        # Key: chat_id; value: dir to send in session/new (None = send empty, FAG uses default).
-        # Cleared when used in _create_session; not persisted.
-        self._next_session_cwd: dict[str, str | None] = {}
+        # One-time cwd for the next session creation only.
+        self._next_session_cwd: dict[str, str] = {}
 
         # Lock for creating new connections (to avoid race conditions)
         self._connection_locks: dict[str, asyncio.Lock] = {}
@@ -85,6 +87,30 @@ class AgentManager:
             self._connection_locks[chat_id] = asyncio.Lock()
         return self._connection_locks[chat_id]
 
+    def _resolve_workspace_path(self, workspace: str | None) -> str:
+        """Resolve a workspace name to an absolute path under workspace_root."""
+        name = self._default_workspace if workspace is None else workspace.strip()
+        if not name:
+            name = self._default_workspace
+
+        candidate = Path(name)
+        if candidate.is_absolute():
+            raise ValueError("工作区名称不能是绝对路径。")
+
+        resolved = (self._workspace_root / candidate).resolve()
+        try:
+            resolved.relative_to(self._workspace_root)
+        except ValueError as exc:
+            raise ValueError("工作区名称不能逃逸出 workspace_root。") from exc
+        return str(resolved)
+
+    def _get_connection_cwd(self, chat_id: str) -> str:
+        """Choose the cwd used when starting the agent subprocess for a chat."""
+        conn = self._connections.get(chat_id)
+        if conn and conn.workspace_cwd is not None:
+            return conn.workspace_cwd
+        return self._next_session_cwd.get(chat_id, self._default_workspace_path)
+
     def _get_or_create_connection(self, chat_id: str) -> AgentConnection:
         """Get or create an AgentConnection for the given chat_id.
 
@@ -92,10 +118,11 @@ class AgentManager:
         """
         if chat_id not in self._connections:
             # Create new connection
+            workspace_cwd = self._get_connection_cwd(chat_id)
             agent_process = AgentProcess(
                 command=self._command,
                 args=self._args,
-                cwd=self._cwd,
+                cwd=workspace_cwd,
                 env=self._env,
             )
             acp_client = NcatAcpClient(agent_manager=self, chat_id=chat_id)
@@ -104,14 +131,21 @@ class AgentManager:
                 acp_client=acp_client,
                 agent_process=agent_process,
                 accumulators={},
+                workspace_cwd=workspace_cwd,
             )
             self._connections[chat_id] = connection
+        else:
+            conn = self._connections[chat_id]
+            desired_cwd = self._get_connection_cwd(chat_id)
+            if conn.workspace_cwd != desired_cwd:
+                conn.workspace_cwd = desired_cwd
+                conn.agent_process.set_cwd(desired_cwd)
         return self._connections[chat_id]
 
     # --- Lifecycle (on-demand connection, no background loop) ---
 
     async def start(self) -> None:
-        """No-op: ncat does not connect at startup; connection is established on first send_prompt."""
+        """No-op: ncat connects lazily on the first prompt."""
         pass
 
     async def ensure_connection(self, chat_id: str) -> None:
@@ -129,6 +163,9 @@ class AgentManager:
             if conn.is_running:
                 return
 
+            conn.workspace_cwd = self._get_connection_cwd(chat_id)
+            Path(conn.workspace_cwd).mkdir(parents=True, exist_ok=True)
+            conn.agent_process.set_cwd(conn.workspace_cwd)
             logger.info("Ensuring agent connection for chat %s (on-demand)...", chat_id)
             try:
                 await conn.agent_process.start_once(
@@ -199,12 +236,8 @@ class AgentManager:
         return await self._create_session(chat_id)
 
     def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
-        """Set cwd for the next session creation only (used by /new [<dir>]).
-
-        dir_or_none: None = send empty (FAG default), else dir for FAG to concatenate
-        Each call overwrites any previous value for this chat. Consumed once in _create_session.
-        """
-        self._next_session_cwd[chat_id] = dir_or_none
+        """Set cwd for the next session creation only (used by /new [<workspace>])."""
+        self._next_session_cwd[chat_id] = self._resolve_workspace_path(dir_or_none)
 
     async def _create_session(self, chat_id: str) -> str:
         """Create a new ACP session for the given chat_id."""
@@ -213,10 +246,10 @@ class AgentManager:
         if acp_conn is None:
             raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
 
-        # One-time cwd: pop so we don't persist. None = send empty string (FAG uses default_cwd)
-        cwd_val = self._next_session_cwd.pop(chat_id, None)
-        # ACP library expects str; send "" for "use FAG default", or the dir string for FAG to concatenate
-        cwd = cwd_val if cwd_val is not None else ""
+        cwd = self._next_session_cwd.pop(chat_id, None) or self._default_workspace_path
+        Path(cwd).mkdir(parents=True, exist_ok=True)
+        conn.workspace_cwd = cwd
+        conn.agent_process.set_cwd(cwd)
 
         # Convert config objects to ACP-compatible dicts
         mcp_servers_payload = []
@@ -381,7 +414,7 @@ class AgentManager:
 
         # Find session_id for this chat
         session_id = None
-        for sid in conn.accumulators.keys():
+        for sid in conn.accumulators:
             session_id = sid
             break
 

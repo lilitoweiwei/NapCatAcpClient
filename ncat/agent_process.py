@@ -16,7 +16,7 @@ import logging
 import os
 import shutil
 import sys
-from typing import Any
+from typing import Any, cast
 
 from acp import PROTOCOL_VERSION, Client, connect_to_agent
 from acp.core import ClientSideConnection
@@ -32,7 +32,7 @@ from acp.schema import (
 logger = logging.getLogger("ncat.agent_process")
 
 # Union of all ACP content block types accepted by conn.prompt().
-PromptBlock = (
+type PromptBlock = (
     TextContentBlock
     | ImageContentBlock
     | AudioContentBlock
@@ -120,6 +120,10 @@ class AgentProcess:
         """The working directory for the agent process."""
         return self._cwd
 
+    def set_cwd(self, cwd: str) -> None:
+        """Update the working directory used for the next subprocess start."""
+        self._cwd = cwd
+
     @property
     def is_running(self) -> bool:
         """Check if the agent process is alive."""
@@ -194,6 +198,7 @@ class AgentProcess:
             self._process.stdout,
             observers=[_acp_stream_observer],
         )
+        conn = cast(Any, self._conn)
 
         init_params = {
             "protocolVersion": PROTOCOL_VERSION,
@@ -211,10 +216,10 @@ class AgentProcess:
         logger.info("Initializing ACP connection...")
         try:
             raw_response = await asyncio.wait_for(
-                self._conn._conn.send_request("initialize", init_params),
+                conn._conn.send_request("initialize", init_params),
                 timeout=timeout,
             )
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             await self.stop()
             raise
         init_result = InitializeResponse.model_validate(raw_response)

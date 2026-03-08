@@ -24,8 +24,10 @@ class AgentConfig:
     command: str = "claude"
     # Arguments to pass to the agent (e.g. ["--experimental-acp"])
     args: list[str] = field(default_factory=list)
-    # Working directory for the agent process
-    cwd: str = "~/.ncat/workspace"
+    # Root directory under which all workspaces are created
+    workspace_root: str = "/workspace"
+    # Default workspace name used when /new is called without an argument
+    default_workspace: str = "default"
     # Extra environment variables for the agent process (merged with system env)
     env: dict[str, str] = field(default_factory=dict)
     # Timeout in seconds for ACP initialize; on timeout, retry after retry_interval_seconds
@@ -128,6 +130,11 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
     # Build config from raw dict, using defaults for missing fields
     server = ServerConfig(**raw.get("server", {}))
     agent_raw = dict(raw.get("agent", {}))
+    if "cwd" in agent_raw:
+        raise ValueError(
+            "[agent].cwd has been removed; use [agent].workspace_root and "
+            "[agent].default_workspace instead"
+        )
     agent_raw.setdefault("initialize_timeout_seconds", 300.0)
     agent_raw.setdefault("retry_interval_seconds", 10.0)
     agent = AgentConfig(**agent_raw)

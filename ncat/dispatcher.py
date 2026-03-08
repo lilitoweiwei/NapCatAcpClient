@@ -9,16 +9,15 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
+# Import bg_command to register /bg * commands (must be after command_registry is created)
+# This module has side effects: registers commands in command_registry
+from ncat import bg_command  # noqa: F401
 from ncat.agent_manager import AgentManager
 from ncat.bsp_client import BspClient
 from ncat.command import command_registry, get_help_text
 from ncat.converter import onebot_to_internal
 from ncat.models import ContentPart
 from ncat.prompt_runner import PromptRunner
-
-# Import bg_command to register /bg * commands (must be after command_registry is created)
-# This module has side effects: registers commands in command_registry
-from ncat import bg_command  # noqa: F401
 
 logger = logging.getLogger("ncat.dispatcher")
 
@@ -93,9 +92,9 @@ class MessageDispatcher:
             event: Raw QQ message event dict
             bot_id: Bot QQ ID (unused, kept for API compatibility)
         """
-        await self.dispatch(event)
+        await self.dispatch(event, bot_id)
 
-    async def dispatch(self, event: dict) -> None:
+    async def dispatch(self, event: dict, bot_id: int | None = None) -> None:
         """
         Dispatch an incoming QQ message event.
 
@@ -111,8 +110,15 @@ class MessageDispatcher:
         """
         try:
             # Step 1: Convert OneBot event to internal message format
-            parsed = onebot_to_internal(event, self._agent_manager)
+            if bot_id is None:
+                logger.warning("Received message before bot_id was available, ignoring")
+                return
+
+            parsed = onebot_to_internal(event, bot_id)
             if not parsed:
+                return
+
+            if parsed.message_type == "group" and not parsed.is_at_bot:
                 return
 
             chat_id = parsed.chat_id
@@ -143,6 +149,9 @@ class MessageDispatcher:
                         reply_fn=self._reply_fn,
                     )
                     if matched:
+                        return
+                    if parsed.text.startswith("/"):
+                        await self._reply_fn(event, get_help_text())
                         return
                 except Exception:
                     # Error already logged by command handler

@@ -292,6 +292,25 @@ async def test_empty_response(full_stack) -> None:
     assert "未返回有效回复" in msg_text
 
 
+async def test_long_text_reply_is_not_truncated(full_stack) -> None:
+    """Integration test: long text replies survive many small streamed chunks."""
+    _, mock, mock_agent = full_stack
+    long_text = "BEGIN-" + ("0123456789" * 30) + "-END"
+    mock_agent.response_parts = [ContentPart(type="text", text=chunk) for chunk in long_text]
+
+    await mock.send_private_message(111, "Alice", "repeat back a long string")
+    api_call = await mock.recv_api_call(timeout=5.0)
+
+    assert api_call is not None
+    assert api_call["action"] == "send_private_msg"
+    sent_text = "".join(
+        seg["data"].get("text", "")
+        for seg in api_call["params"]["message"]
+        if seg["type"] == "text"
+    )
+    assert sent_text == long_text
+
+
 async def test_agent_crash_sends_error(full_stack) -> None:
     """Test that agent crash sends user-friendly error message."""
     server, mock, mock_agent = full_stack

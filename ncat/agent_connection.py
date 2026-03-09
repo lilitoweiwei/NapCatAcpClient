@@ -32,6 +32,7 @@ class AgentConnection:
     active_session_id: str | None = None
     active_turn_session_id: str | None = None
     turn_accumulator: list[ContentPart] = field(default_factory=list)
+    turn_update_count: int = 0
     active_prompt: bool = False
     workspace_cwd: str | None = None
 

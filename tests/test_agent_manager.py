@@ -49,6 +49,41 @@ class DummyAcpConnection:
         self.cancel_calls.append(session_id)
 
 
+class DelayedTrailingUpdateAcpConnection(DummyAcpConnection):
+    """ACP stub that emits late chunks after prompt() resolves."""
+
+    def __init__(self, manager: AgentManager, chat_id: str) -> None:
+        super().__init__()
+        self._manager = manager
+        self._chat_id = chat_id
+        self._tasks: list[asyncio.Task[None]] = []
+
+    async def prompt(self, session_id: str, prompt: list) -> SimpleNamespace:
+        self.prompt_calls.append((session_id, prompt))
+        self._manager.accumulate_part(
+            self._chat_id,
+            session_id,
+            ContentPart(type="text", text="foo"),
+        )
+
+        async def _late_chunks() -> None:
+            await asyncio.sleep(0.05)
+            self._manager.accumulate_part(
+                self._chat_id,
+                session_id,
+                ContentPart(type="text", text="bar"),
+            )
+            await asyncio.sleep(0.05)
+            self._manager.accumulate_part(
+                self._chat_id,
+                session_id,
+                ContentPart(type="text", text="baz"),
+            )
+
+        self._tasks.append(asyncio.create_task(_late_chunks()))
+        return SimpleNamespace(stop_reason="end_turn")
+
+
 def _manager(tmp_path: Path) -> AgentManager:
     return AgentManager(
         command="claude",
@@ -161,6 +196,19 @@ async def test_close_session_forces_next_prompt_to_create_new_session(tmp_path: 
     await manager.send_prompt("private:1", [])
 
     assert [session_id for session_id, _ in acp_conn.prompt_calls] == ["sess-1", "sess-2"]
+
+
+@pytest.mark.asyncio
+async def test_send_prompt_waits_for_trailing_updates_after_prompt_return(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+    acp_conn = DelayedTrailingUpdateAcpConnection(manager, "private:1")
+    conn.agent_process._conn = acp_conn
+    conn.agent_process._process = cast(Any, DummyProcess())
+
+    parts = await manager.send_prompt("private:1", [])
+
+    assert "".join(part.text for part in parts if part.type == "text") == "foobarbaz"
 
 
 @pytest.mark.asyncio

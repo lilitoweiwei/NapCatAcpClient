@@ -166,6 +166,7 @@ class AgentManager:
             conn.active_session_id = None
             conn.active_turn_session_id = None
             conn.turn_accumulator.clear()
+            conn.turn_update_count = 0
             conn.active_prompt = False
             conn.workspace_cwd = self._get_connection_cwd(chat_id)
             Path(conn.workspace_cwd).mkdir(parents=True, exist_ok=True)
@@ -196,6 +197,7 @@ class AgentManager:
                 conn.active_session_id = None
                 conn.active_turn_session_id = None
                 conn.turn_accumulator.clear()
+                conn.turn_update_count = 0
                 conn.active_prompt = False
                 logger.info("Agent disconnected for chat %s", chat_id)
         else:
@@ -207,6 +209,7 @@ class AgentManager:
                 conn.active_session_id = None
                 conn.active_turn_session_id = None
                 conn.turn_accumulator.clear()
+                conn.turn_update_count = 0
                 conn.active_prompt = False
             self._connections.clear()
             logger.info("All agent connections closed")
@@ -303,6 +306,7 @@ class AgentManager:
         conn.active_session_id = session_id
         conn.active_turn_session_id = None
         conn.turn_accumulator.clear()
+        conn.turn_update_count = 0
         logger.info("Created ACP session %s for chat %s", session_id, chat_id)
         return session_id
 
@@ -318,6 +322,7 @@ class AgentManager:
             conn.active_session_id = None
             conn.active_turn_session_id = None
             conn.turn_accumulator.clear()
+            conn.turn_update_count = 0
             conn.active_prompt = False
             logger.info("Closed session for chat %s", chat_id)
 
@@ -344,6 +349,37 @@ class AgentManager:
             and conn.active_turn_session_id == session_id
         ):
             conn.turn_accumulator.append(part)
+            conn.turn_update_count += 1
+
+    async def wait_for_turn_settle(
+        self,
+        chat_id: str,
+        *,
+        idle_seconds: float = 0.15,
+        max_wait_seconds: float = 2.0,
+    ) -> None:
+        """Wait briefly for trailing session updates after prompt completion."""
+        conn = self._connections.get(chat_id)
+        if conn is None or not conn.active_prompt:
+            return
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max_wait_seconds
+        last_count = conn.turn_update_count
+
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return
+
+            await asyncio.sleep(min(idle_seconds, remaining))
+            if not conn.active_prompt:
+                return
+
+            current_count = conn.turn_update_count
+            if current_count == last_count:
+                return
+            last_count = current_count
 
     # --- Prompt sending ---
 
@@ -373,6 +409,7 @@ class AgentManager:
 
         # Initialize turn-level state
         conn.turn_accumulator.clear()
+        conn.turn_update_count = 0
         conn.active_turn_session_id = session_id
         conn.active_prompt = True
 
@@ -384,6 +421,8 @@ class AgentManager:
                 session_id=session_id,
                 prompt=list(prompt),
             )
+
+            await self.wait_for_turn_settle(chat_id)
 
             # Collect accumulated content for this turn only.
             parts = list(conn.turn_accumulator)
@@ -409,6 +448,7 @@ class AgentManager:
 
         finally:
             conn.turn_accumulator.clear()
+            conn.turn_update_count = 0
             conn.active_turn_session_id = None
             conn.active_prompt = False
 

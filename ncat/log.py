@@ -1,10 +1,88 @@
-"""Logging initialization for ncat."""
+"""Logging initialization and structured event helpers for ncat."""
 
+import json
 import logging
+import os
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 from ncat.config import LoggingConfig
+
+_STANDARD = set(logging.makeLogRecord({}).__dict__.keys()) | {"asctime", "message", "args"}
+
+
+def _normalize(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(k): _normalize(v) for k, v in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_normalize(v) for v in value]
+    return str(value)
+
+
+def _extra(event: str, **fields: Any) -> dict[str, Any]:
+    payload = {"event": event}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        if key in _STANDARD:
+            key = f"field_{key}"
+        payload[key] = value
+    return payload
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, Any] = {
+            "ts": datetime.fromtimestamp(record.created, timezone.utc).isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "service": getattr(record, "service", "ncat"),
+            "event": getattr(record, "event", "log"),
+            "msg": record.getMessage(),
+            "workspace": getattr(record, "workspace", os.getenv("SUZU_WORKSPACE", "unknown")),
+            "module": record.name,
+            "pid": record.process,
+        }
+
+        for key, value in record.__dict__.items():
+            if key in _STANDARD or key.startswith("_"):
+                continue
+            payload[key] = _normalize(value)
+
+        if record.exc_info:
+            payload.setdefault("err", str(record.exc_info[1]))
+            payload.setdefault("trace", self.formatException(record.exc_info))
+
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def debug_event(logger: logging.Logger, event: str, msg: str, **fields: Any) -> None:
+    logger.debug(msg, extra=_extra(event, **fields))
+
+
+def info_event(logger: logging.Logger, event: str, msg: str, **fields: Any) -> None:
+    logger.info(msg, extra=_extra(event, **fields))
+
+
+def warning_event(logger: logging.Logger, event: str, msg: str, **fields: Any) -> None:
+    logger.warning(msg, extra=_extra(event, **fields))
+
+
+def error_event(
+    logger: logging.Logger,
+    event: str,
+    msg: str,
+    *,
+    exc_info: bool = False,
+    **fields: Any,
+) -> None:
+    logger.error(msg, extra=_extra(event, **fields), exc_info=exc_info)
 
 
 def _cleanup_old_logs(log_dir: Path, max_total_bytes: int) -> None:
@@ -42,9 +120,11 @@ def setup_logging(config: LoggingConfig) -> None:
     # Configure root ncat logger (set to DEBUG so file handler can capture everything)
     logger = logging.getLogger("ncat")
     logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+    logger.propagate = False
 
-    # Log format: [2026-02-13 10:30:00] [INFO] [module] message
-    formatter = logging.Formatter(
+    # Console stays human-friendly.
+    console_formatter = logging.Formatter(
         "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
@@ -52,10 +132,10 @@ def setup_logging(config: LoggingConfig) -> None:
     # Console handler — uses configured level (default INFO)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(getattr(logging, config.level.upper(), logging.INFO))
-    console_handler.setFormatter(formatter)
+    console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
-    # File handler — always DEBUG for full diagnostics
+    # File handler — always DEBUG and written as JSONL for agent-friendly queries
     log_file = log_dir / "ncat.log"
     file_handler = TimedRotatingFileHandler(
         log_file,
@@ -65,5 +145,5 @@ def setup_logging(config: LoggingConfig) -> None:
         encoding="utf-8",
     )
     file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(JsonFormatter())
     logger.addHandler(file_handler)

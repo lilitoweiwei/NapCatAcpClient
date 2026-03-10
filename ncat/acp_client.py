@@ -39,6 +39,7 @@ from acp.schema import (
     WriteTextFileResponse,
 )
 
+from ncat.log import debug_event
 from ncat.models import ContentPart
 
 if TYPE_CHECKING:
@@ -104,14 +105,22 @@ class NcatAcpClient(Client):
                     ),
                 )
         elif isinstance(update, (ToolCallStart, ToolCallProgress)):
-            logger.debug(
-                "Tool call update for session %s (chat %s): %s",
-                session_id,
-                self._chat_id,
-                type(update).__name__,
+            debug_event(
+                logger,
+                "tool_call_update",
+                "Tool call update received",
+                session_id=session_id,
+                chat_id=self._chat_id,
+                update_type=type(update).__name__,
             )
         elif isinstance(update, AgentPlanUpdate):
-            logger.debug("Agent plan update for session %s (chat %s)", session_id, self._chat_id)
+            debug_event(
+                logger,
+                "agent_plan_update",
+                "Agent plan update received",
+                session_id=session_id,
+                chat_id=self._chat_id,
+            )
 
     async def request_permission(
         self,

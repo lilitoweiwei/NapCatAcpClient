@@ -7,6 +7,8 @@ from collections.abc import Awaitable, Callable
 
 import aiomqtt
 
+from ncat.log import debug_event, error_event, info_event, warning_event
+
 logger = logging.getLogger("ncat.mqtt_subscriber")
 
 # Type alias for the reply callback
@@ -66,14 +68,29 @@ class MqttSubscriber:
             # Subscribe to ncat notifications
             topic = f"{self.topic_prefix}/system/ncat/#"
             await self._client.subscribe(topic)
-            logger.info("Subscribed to MQTT topic: %s", topic)
+            info_event(
+                logger,
+                "mqtt_subscribed",
+                "Subscribed to MQTT topic",
+                topic=topic,
+                host=self.host,
+                port=self.port,
+                client_id=self.client_id,
+            )
 
             # Start listening loop
             self._running = True
             # Store task reference to prevent GC from cancelling it
             self._listen_task = asyncio.create_task(self._listen_loop())
         except Exception as e:
-            logger.error("Failed to connect to MQTT broker: %s", e)
+            error_event(
+                logger,
+                "mqtt_connect_fail",
+                "Failed to connect to MQTT broker",
+                host=self.host,
+                port=self.port,
+                err=str(e),
+            )
             raise
 
     async def stop(self) -> None:
@@ -82,7 +99,7 @@ class MqttSubscriber:
         if self._client:
             await self._client.__aexit__(None, None, None)
             self._client = None
-            logger.info("Disconnected from MQTT broker")
+            info_event(logger, "mqtt_disconnect", "Disconnected from MQTT broker")
 
     async def _listen_loop(self) -> None:
         """Listen for MQTT messages."""
@@ -97,7 +114,7 @@ class MqttSubscriber:
                 payload = json.loads(message.payload.decode("utf-8"))
                 await self._handle_message(topic, payload)
         except Exception as e:
-            logger.error("Error in MQTT listen loop: %s", e)
+            error_event(logger, "mqtt_listen_fail", "Error in MQTT listen loop", err=str(e))
 
     async def _handle_message(self, topic: str, payload: dict) -> None:
         """Route MQTT notification to QQ chat.
@@ -109,7 +126,12 @@ class MqttSubscriber:
         # Parse topic: {prefix}/system/{frontend}/{chat_id} (e.g. suzu/system/ncat/private:123)
         parts = topic.split("/")
         if len(parts) < 4:
-            logger.warning("Invalid MQTT topic format: %s", topic)
+            warning_event(
+                logger,
+                "mqtt_topic_invalid",
+                "Invalid MQTT topic format",
+                topic=topic,
+            )
             return
 
         chat_id = parts[3]
@@ -117,7 +139,13 @@ class MqttSubscriber:
 
         if msg_type == "bg_created":
             text = f"后台任务已创建，ID: {payload.get('name', 'unknown')}"
-            logger.info("Received bg_created notification for chat %s", chat_id)
+            info_event(
+                logger,
+                "mqtt_bg_created",
+                "Received bg_created notification",
+                chat_id=chat_id,
+                bg_name=payload.get("name"),
+            )
         elif msg_type == "bg_waiting":
             last_msg = payload.get("last_message", "")
             if last_msg and len(last_msg) > 200:
@@ -125,13 +153,30 @@ class MqttSubscriber:
             text = f"后台任务 {payload.get('name', 'unknown')} 已完成等待输入"
             if last_msg:
                 text += f"，最后输出：{last_msg}"
-            logger.info("Received bg_waiting notification for chat %s", chat_id)
+            info_event(
+                logger,
+                "mqtt_bg_waiting",
+                "Received bg_waiting notification",
+                chat_id=chat_id,
+                bg_name=payload.get("name"),
+            )
         else:
-            logger.debug("Ignoring unknown MQTT message type: %s", msg_type)
+            debug_event(
+                logger,
+                "mqtt_ignored",
+                "Ignoring unknown MQTT message type",
+                chat_id=chat_id,
+                msg_type=msg_type,
+            )
             return
 
         # Send QQ reply
         if self._reply_fn:
             await self._reply_fn(chat_id, text)
         else:
-            logger.warning("No reply function set, cannot send MQTT notification to QQ")
+            warning_event(
+                logger,
+                "mqtt_reply_missing",
+                "No reply function set for MQTT notification",
+                chat_id=chat_id,
+            )

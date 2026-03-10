@@ -7,7 +7,7 @@ from pathlib import Path
 from ncat.agent_manager import AgentManager
 from ncat.bsp_client import BspClient
 from ncat.config import get_config_path, load_config
-from ncat.log import setup_logging
+from ncat.log import info_event, setup_logging
 from ncat.mqtt_subscriber import MqttSubscriber
 from ncat.napcat_server import NcatNapCatServer
 
@@ -22,22 +22,27 @@ async def main() -> None:
 
     # Initialize logging
     setup_logging(config.logging)
-    logger.info("ncat starting up (config: %s)", config_path)
+    info_event(logger, "service_start", "ncat starting up", config_path=config_path)
 
     # Ensure workspace directories exist
     workspace_root = Path(config.agent.workspace_root).expanduser().resolve()
     workspace_root.mkdir(parents=True, exist_ok=True)
     default_workspace = workspace_root / config.agent.default_workspace
     default_workspace.mkdir(parents=True, exist_ok=True)
-    logger.info("Workspace root: %s", workspace_root)
-    logger.info("Default workspace: %s", default_workspace)
+    info_event(
+        logger,
+        "workspace_ready",
+        "workspace directories ready",
+        workspace_root=str(workspace_root),
+        default_workspace=str(default_workspace),
+    )
 
     # Initialize BSP client for background session management
     bsp_client = None
     if config.bsp_server.enabled:
         base_url = f"http://{config.bsp_server.host}:{config.bsp_server.port}"
         bsp_client = BspClient(base_url)
-        logger.info("BSP client initialized: %s", base_url)
+        info_event(logger, "bsp_client_ready", "BSP client initialized", base_url=base_url)
 
     # Initialize MQTT subscriber for session notifications
     mqtt_subscriber = None
@@ -48,10 +53,13 @@ async def main() -> None:
             topic_prefix=config.mqtt.topic_prefix,
             client_id=config.mqtt.client_id,
         )
-        logger.info(
-            "MQTT subscriber configured: %s:%d",
-            config.mqtt.host,
-            config.mqtt.port,
+        info_event(
+            logger,
+            "mqtt_configured",
+            "MQTT subscriber configured",
+            host=config.mqtt.host,
+            port=config.mqtt.port,
+            client_id=config.mqtt.client_id,
         )
 
     # Initialize agent manager (no connection at startup; connect on first user message)
@@ -65,7 +73,13 @@ async def main() -> None:
         initialize_timeout_seconds=config.agent.initialize_timeout_seconds,
         retry_interval_seconds=config.agent.retry_interval_seconds,
     )
-    logger.info("WebSocket server starting; agent will connect on first user message")
+    info_event(
+        logger,
+        "server_start",
+        "WebSocket server starting; agent will connect on first user message",
+        host=config.server.host,
+        port=config.server.port,
+    )
 
     # Start WebSocket server for NapCatQQ
     server = NcatNapCatServer(
@@ -93,7 +107,7 @@ async def main() -> None:
         if bsp_client:
             await bsp_client.close()
         await agent_manager.stop()
-        logger.info("ncat shut down.")
+        info_event(logger, "service_stop", "ncat shut down")
 
 
 if __name__ == "__main__":

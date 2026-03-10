@@ -29,6 +29,8 @@ from acp.schema import (
     TextContentBlock,
 )
 
+from ncat.log import debug_event, info_event
+
 logger = logging.getLogger("ncat.agent_process")
 
 # Union of all ACP content block types accepted by conn.prompt().
@@ -66,13 +68,15 @@ def _acp_stream_observer(event: Any) -> None:
 
     # Tag with ← (incoming) or → (outgoing) for quick scanning
     arrow = "←" if direction == "incoming" else "→"
-    logger.debug(
-        "ACP %s [%s] id=%s method=%s: %s",
-        arrow,
-        direction,
-        msg_id,
-        method,
-        raw,
+    debug_event(
+        logger,
+        "acp_stream",
+        "ACP stream message observed",
+        direction=direction,
+        arrow=arrow,
+        request_id=msg_id,
+        method=method,
+        raw=raw,
     )
 
 
@@ -146,19 +150,23 @@ class AgentProcess:
         """
         await self.stop()
 
-        logger.info(
-            "Starting agent: %s %s (cwd: %s)",
-            self._command,
-            " ".join(self._args),
-            self._cwd,
+        info_event(
+            logger,
+            "agent_spawn_start",
+            "Starting agent subprocess",
+            command=self._command,
+            cmd_args=self._args,
+            cwd=self._cwd,
         )
 
         proc_env: dict[str, str] | None = None
         if self._extra_env:
             proc_env = {**os.environ, **self._extra_env}
-            logger.info(
-                "Agent extra env vars: %s",
-                ", ".join(self._extra_env.keys()),
+            info_event(
+                logger,
+                "agent_env_override",
+                "Agent extra environment variables configured",
+                env_keys=sorted(self._extra_env.keys()),
             )
 
         resolved = shutil.which(self._command)
@@ -168,7 +176,12 @@ class AgentProcess:
         use_shell = sys.platform == "win32" and resolved.lower().endswith((".cmd", ".bat"))
         if use_shell:
             shell_args = [resolved, *self._args]
-            logger.debug("Using shell execution for .cmd wrapper: %s", resolved)
+            debug_event(
+                logger,
+                "agent_spawn_shell",
+                "Using shell execution for .cmd wrapper",
+                command=resolved,
+            )
             self._process = await asyncio.create_subprocess_exec(
                 "cmd",
                 "/c",
@@ -212,8 +225,8 @@ class AgentProcess:
                 "version": "0.2.0",
             },
         }
-        logger.debug("init_params: %s", init_params)
-        logger.info("Initializing ACP connection...")
+        debug_event(logger, "acp_initialize_payload", "ACP initialize payload prepared", params=init_params)
+        info_event(logger, "acp_initialize_start", "Initializing ACP connection")
         try:
             raw_response = await asyncio.wait_for(
                 conn._conn.send_request("initialize", init_params),
@@ -225,12 +238,19 @@ class AgentProcess:
         init_result = InitializeResponse.model_validate(raw_response)
         prompt_caps = getattr(init_result.agent_capabilities, "prompt_capabilities", None)
         self._supports_image = bool(getattr(prompt_caps, "image", False))
-        logger.info(
-            "ACP initialized: agent=%s protocol_version=%s",
-            init_result.agent_info,
-            init_result.protocol_version,
+        info_event(
+            logger,
+            "acp_initialize_ok",
+            "ACP initialized",
+            agent_info=str(init_result.agent_info),
+            protocol_version=init_result.protocol_version,
         )
-        logger.info("ACP prompt capabilities: image=%s", self._supports_image)
+        info_event(
+            logger,
+            "acp_capabilities",
+            "ACP prompt capabilities detected",
+            supports_image=self._supports_image,
+        )
 
     async def wait(self) -> None:
         """Wait for the agent subprocess to exit (e.g. after connection is lost)."""
@@ -247,10 +267,15 @@ class AgentProcess:
 
         # Terminate the agent subprocess
         if self._process is not None and self._process.returncode is None:
-            logger.info("Terminating agent subprocess (pid=%s)", self._process.pid)
+            info_event(
+                logger,
+                "agent_spawn_stop",
+                "Terminating agent subprocess",
+                pid=self._process.pid,
+            )
             self._process.terminate()
             with contextlib.suppress(ProcessLookupError):
                 await self._process.wait()
             self._process = None
 
-        logger.info("Agent stopped")
+        info_event(logger, "agent_spawn_stopped", "Agent stopped")

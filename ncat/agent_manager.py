@@ -18,6 +18,7 @@ from ncat.acp_client import NcatAcpClient
 from ncat.agent_connection import AgentConnection
 from ncat.agent_process import AgentProcess, PromptBlock
 from ncat.config import McpServerConfig
+from ncat.log import info_event, warning_event
 from ncat.models import ContentPart
 
 logger = logging.getLogger("ncat.agent_manager")
@@ -171,14 +172,31 @@ class AgentManager:
             conn.workspace_cwd = self._get_connection_cwd(chat_id)
             Path(conn.workspace_cwd).mkdir(parents=True, exist_ok=True)
             conn.agent_process.set_cwd(conn.workspace_cwd)
-            logger.info("Ensuring agent connection for chat %s (on-demand)...", chat_id)
+            info_event(
+                logger,
+                "agent_connect_start",
+                "Ensuring agent connection on demand",
+                chat_id=chat_id,
+                cwd=conn.workspace_cwd,
+            )
             try:
                 await conn.agent_process.start_once(
                     conn.acp_client, self._initialize_timeout_seconds
                 )
-                logger.info("Agent connection established for chat %s", chat_id)
+                info_event(
+                    logger,
+                    "agent_connect_ok",
+                    "Agent connection established",
+                    chat_id=chat_id,
+                )
             except Exception as e:
-                logger.warning("Agent connection failed for chat %s: %s", chat_id, e)
+                warning_event(
+                    logger,
+                    "agent_connect_fail",
+                    "Agent connection failed",
+                    chat_id=chat_id,
+                    err=str(e),
+                )
                 raise
 
     async def disconnect(self, chat_id: str | None = None) -> None:
@@ -199,7 +217,7 @@ class AgentManager:
                 conn.turn_accumulator.clear()
                 conn.turn_update_count = 0
                 conn.active_prompt = False
-                logger.info("Agent disconnected for chat %s", chat_id)
+                info_event(logger, "agent_disconnect", "Agent disconnected", chat_id=chat_id)
         else:
             # Disconnect all chats
             chat_ids = list(self._connections.keys())
@@ -212,7 +230,7 @@ class AgentManager:
                 conn.turn_update_count = 0
                 conn.active_prompt = False
             self._connections.clear()
-            logger.info("All agent connections closed")
+            info_event(logger, "agent_disconnect_all", "All agent connections closed")
 
     async def stop(self) -> None:
         """Stop all agent subprocesses and clear state (e.g. on ncat shutdown)."""
@@ -267,7 +285,13 @@ class AgentManager:
         for server in self._mcp_servers:
             if server.transport == "sse":
                 if not server.url:
-                    logger.warning("MCP server %s (sse) missing URL, skipping", server.name)
+                    warning_event(
+                        logger,
+                        "mcp_config_invalid",
+                        "Skipping MCP server with missing URL",
+                        transport="sse",
+                        server_name=server.name,
+                    )
                     continue
                 item = {
                     "type": "sse",
@@ -278,7 +302,13 @@ class AgentManager:
                 mcp_servers_payload.append(item)
             elif server.transport == "stdio":
                 if not server.command:
-                    logger.warning("MCP server %s (stdio) missing command, skipping", server.name)
+                    warning_event(
+                        logger,
+                        "mcp_config_invalid",
+                        "Skipping MCP server with missing command",
+                        transport="stdio",
+                        server_name=server.name,
+                    )
                     continue
                 item = {
                     "name": server.name,
@@ -291,12 +321,20 @@ class AgentManager:
                 mcp_servers_payload.append(item)
 
         if mcp_servers_payload:
-            logger.info(
-                "Configuring session with MCP servers: %s",
-                [s.get("name") for s in mcp_servers_payload],
+            info_event(
+                logger,
+                "mcp_session_configured",
+                "Configuring session with MCP servers",
+                chat_id=chat_id,
+                mcp_servers=[s.get("name") for s in mcp_servers_payload],
             )
         else:
-            logger.info("No MCP servers configured for this session")
+            info_event(
+                logger,
+                "mcp_session_empty",
+                "No MCP servers configured for this session",
+                chat_id=chat_id,
+            )
 
         session = await acp_conn.new_session(
             cwd=cwd,
@@ -307,7 +345,14 @@ class AgentManager:
         conn.active_turn_session_id = None
         conn.turn_accumulator.clear()
         conn.turn_update_count = 0
-        logger.info("Created ACP session %s for chat %s", session_id, chat_id)
+        info_event(
+            logger,
+            "session_create_ok",
+            "Created ACP session",
+            chat_id=chat_id,
+            session_id=session_id,
+            cwd=cwd,
+        )
         return session_id
 
     async def close_session(self, chat_id: str) -> None:
@@ -324,14 +369,14 @@ class AgentManager:
             conn.turn_accumulator.clear()
             conn.turn_update_count = 0
             conn.active_prompt = False
-            logger.info("Closed session for chat %s", chat_id)
+            info_event(logger, "session_close", "Closed session", chat_id=chat_id)
 
     async def close_all_sessions(self) -> None:
         """Close all active sessions (e.g. on NapCat disconnect)."""
         chat_ids = list(self._connections.keys())
         for chat_id in chat_ids:
             await self.close_session(chat_id)
-        logger.info("All sessions closed")
+        info_event(logger, "session_close_all", "All sessions closed")
 
     # --- Content accumulation (called by NcatAcpClient.session_update) ---
 
@@ -428,13 +473,15 @@ class AgentManager:
             parts = list(conn.turn_accumulator)
             text_len = sum(len(p.text) for p in parts if p.type == "text")
 
-            logger.info(
-                "Prompt completed for %s (session %s): stop_reason=%s, text=%d chars, parts=%d",
-                chat_id,
-                session_id,
-                response.stop_reason,
-                text_len,
-                len(parts),
+            info_event(
+                logger,
+                "prompt_complete",
+                "Prompt completed",
+                chat_id=chat_id,
+                session_id=session_id,
+                stop_reason=response.stop_reason,
+                text_len=text_len,
+                part_count=len(parts),
             )
             return parts
 
@@ -475,10 +522,12 @@ class AgentManager:
         if session_id is None:
             return False
 
-        logger.info(
-            "Sending cancel for chat %s (session %s)",
-            chat_id,
-            session_id,
+        info_event(
+            logger,
+            "prompt_cancel",
+            "Sending cancel for active prompt",
+            chat_id=chat_id,
+            session_id=session_id,
         )
         await acp_conn.cancel(session_id=session_id)
         return True

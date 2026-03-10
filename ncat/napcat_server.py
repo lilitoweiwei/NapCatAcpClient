@@ -14,6 +14,7 @@ from websockets.asyncio.server import ServerConnection
 from ncat.agent_manager import AgentManager
 from ncat.converter import ai_to_onebot, content_to_onebot
 from ncat.dispatcher import MessageDispatcher
+from ncat.log import debug_event, info_event, warning_event
 from ncat.models import ContentPart
 
 logger = logging.getLogger("ncat.napcat_server")
@@ -65,11 +66,17 @@ class NcatNapCatServer:
 
     async def start(self) -> None:
         """Start the WebSocket server and run forever."""
-        logger.info("Starting ncat server on ws://%s:%d", self._host, self._port)
+        info_event(
+            logger,
+            "ws_server_start",
+            "Starting ncat server",
+            host=self._host,
+            port=self._port,
+        )
         # Use None for host to bind all interfaces (IPv4 + IPv6)
         host = None if self._host == "0.0.0.0" else self._host
         async with websockets.serve(self._handler_ws, host, self._port):
-            logger.info("Server ready, waiting for NapCatQQ connection...")
+            info_event(logger, "ws_server_ready", "Server ready, waiting for NapCatQQ connection")
             await asyncio.Future()  # run forever
 
     # --- WebSocket connection handling ---
@@ -77,7 +84,7 @@ class NcatNapCatServer:
     async def _handler_ws(self, websocket: ServerConnection) -> None:
         """Handle a WebSocket connection from NapCatQQ."""
         remote = websocket.remote_address
-        logger.info("NapCatQQ connected from %s", remote)
+        info_event(logger, "ws_connect_ok", "NapCatQQ connected", remote=str(remote))
         self._connection = websocket
 
         try:
@@ -85,7 +92,12 @@ class NcatNapCatServer:
                 try:
                     data = json.loads(raw_message)
                 except json.JSONDecodeError:
-                    logger.warning("Non-JSON message received: %s", str(raw_message)[:200])
+                    warning_event(
+                        logger,
+                        "ws_message_invalid",
+                        "Non-JSON message received",
+                        raw_preview=str(raw_message)[:200],
+                    )
                     continue
 
                 # Check if this is an API response (has echo field matching a pending request)
@@ -99,15 +111,21 @@ class NcatNapCatServer:
                 await self._dispatch_event(data)
 
         except websockets.ConnectionClosed as e:
-            logger.warning("Connection closed: code=%s reason=%s", e.code, e.reason)
+            warning_event(
+                logger,
+                "ws_disconnect",
+                "Connection closed",
+                code=e.code,
+                reason=e.reason,
+            )
         finally:
             if self._connection is websocket:
                 self._connection = None
                 # Close all ACP sessions and disconnect from agent when NapCat disconnects
-                logger.info("NapCat disconnected, closing all ACP sessions")
+                info_event(logger, "ws_cleanup", "NapCat disconnected, closing all ACP sessions")
                 await self._agent_manager.close_all_sessions()
                 await self._agent_manager.disconnect()
-            logger.info("Connection handler exited")
+            info_event(logger, "ws_handler_exit", "Connection handler exited")
 
     async def _dispatch_event(self, event: dict) -> None:
         """Route an incoming OneBot event to the appropriate handler."""
@@ -116,28 +134,37 @@ class NcatNapCatServer:
         # Extract bot ID from any event's self_id
         if self._bot_id is None and "self_id" in event:
             self._bot_id = event["self_id"]
-            logger.info("Bot QQ ID: %d", self._bot_id)
+            info_event(logger, "bot_id_ready", "Bot QQ ID captured", self_id=self._bot_id)
 
         if post_type == "meta_event":
             meta_type = event.get("meta_event_type", "")
             if meta_type == "lifecycle":
-                logger.info("Lifecycle event: sub_type=%s", event.get("sub_type"))
+                info_event(
+                    logger,
+                    "meta_lifecycle",
+                    "Lifecycle event received",
+                    sub_type=event.get("sub_type"),
+                )
             elif meta_type == "heartbeat":
                 # logger.debug("Heartbeat received")
                 pass
             else:
-                logger.debug("Unhandled meta event: %s", meta_type)
+                debug_event(logger, "meta_unhandled", "Unhandled meta event", meta_type=meta_type)
 
         elif post_type == "message":
             # Log every incoming message at DEBUG for full traceability
             msg_type = event.get("message_type", "?")
             user_id = event.get("user_id", "?")
             raw_msg = event.get("raw_message", "")[:150]
-            logger.debug(
-                "Raw message event: type=%s user=%s raw=%s",
-                msg_type,
-                user_id,
-                raw_msg,
+            debug_event(
+                logger,
+                "transport_message_received",
+                "Raw message event received",
+                message_type=msg_type,
+                user_id=user_id,
+                raw_message=raw_msg,
+                group_id=event.get("group_id"),
+                message_id=event.get("message_id"),
             )
             # Delegate to message handler in a separate task
             if self._bot_id is not None:
@@ -145,24 +172,36 @@ class NcatNapCatServer:
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
             else:
-                logger.warning("Received message before bot_id was set, ignoring")
+                warning_event(
+                    logger,
+                    "transport_message_ignored",
+                    "Received message before bot_id was set",
+                )
 
         elif post_type == "notice":
-            logger.debug(
-                "Unhandled notice event: type=%s data=%s",
-                event.get("notice_type", "?"),
-                {k: v for k, v in event.items() if k not in ("post_type",)},
+            debug_event(
+                logger,
+                "notice_unhandled",
+                "Unhandled notice event",
+                notice_type=event.get("notice_type", "?"),
             )
 
         elif post_type == "request":
-            logger.debug(
-                "Unhandled request event: type=%s data=%s",
-                event.get("request_type", "?"),
-                {k: v for k, v in event.items() if k not in ("post_type",)},
+            debug_event(
+                logger,
+                "request_unhandled",
+                "Unhandled request event",
+                request_type=event.get("request_type", "?"),
             )
 
         else:
-            logger.debug("Unknown post_type: %s keys=%s", post_type, list(event.keys()))
+            debug_event(
+                logger,
+                "post_type_unknown",
+                "Unknown post_type received",
+                post_type=post_type,
+                keys=list(event.keys()),
+            )
 
     # --- Outbound messaging ---
 
@@ -185,9 +224,21 @@ class NcatNapCatServer:
                     {"user_id": user_id, "message": segments},
                 )
                 if resp and resp.get("retcode") != 0:
-                    logger.warning("send_private_msg failed: %s", resp)
+                    warning_event(
+                        logger,
+                        "reply_send_fail",
+                        "send_private_msg failed",
+                        chat_id=chat_id,
+                        action="send_private_msg",
+                        retcode=resp.get("retcode"),
+                    )
             except ValueError:
-                logger.warning("Invalid chat_id for MQTT notification: %s", chat_id)
+                warning_event(
+                    logger,
+                    "reply_send_invalid_chat",
+                    "Invalid private chat_id for MQTT notification",
+                    chat_id=chat_id,
+                )
         elif chat_id.startswith("group:"):
             try:
                 group_id = int(chat_id.split(":", 1)[1])
@@ -196,14 +247,27 @@ class NcatNapCatServer:
                     {"group_id": group_id, "message": segments},
                 )
                 if resp and resp.get("retcode") != 0:
-                    logger.warning("send_group_msg failed: %s", resp)
+                    warning_event(
+                        logger,
+                        "reply_send_fail",
+                        "send_group_msg failed",
+                        chat_id=chat_id,
+                        action="send_group_msg",
+                        retcode=resp.get("retcode"),
+                    )
             except ValueError:
-                logger.warning("Invalid chat_id for MQTT notification: %s", chat_id)
+                warning_event(
+                    logger,
+                    "reply_send_invalid_chat",
+                    "Invalid group chat_id for MQTT notification",
+                    chat_id=chat_id,
+                )
         else:
-            logger.warning(
-                "Invalid chat_id for MQTT notification "
-                "(expected private:X or group:X): %s",
-                chat_id,
+            warning_event(
+                logger,
+                "reply_send_invalid_chat",
+                "Invalid chat_id for MQTT notification",
+                chat_id=chat_id,
             )
 
     async def _reply_text(self, event: dict, text: str) -> None:
@@ -212,40 +276,13 @@ class NcatNapCatServer:
         segments = ai_to_onebot(text)
 
         # Log the reply text at DEBUG (may be long)
-        logger.debug("Reply text (%d chars): %s", len(text), text[:300])
-
-        if message_type == "private":
-            resp = await self.send_api(
-                "send_private_msg",
-                {
-                    "user_id": event["user_id"],
-                    "message": segments,
-                },
-            )
-            if resp and resp.get("retcode") != 0:
-                logger.warning("send_private_msg failed: %s", resp)
-        elif message_type == "group":
-            resp = await self.send_api(
-                "send_group_msg",
-                {
-                    "group_id": event["group_id"],
-                    "message": segments,
-                },
-            )
-            if resp and resp.get("retcode") != 0:
-                logger.warning("send_group_msg failed: %s", resp)
-
-    async def _reply_content(self, event: dict, parts: list[ContentPart]) -> None:
-        """Send a mixed (text+image) reply back to the source of the message event."""
-        message_type = event.get("message_type", "")
-        segments = content_to_onebot(parts)
-
-        text_preview = "".join(p.text for p in parts if p.type == "text")[:300]
-        logger.debug(
-            "Reply content: parts=%d segments=%d text_preview=%s",
-            len(parts),
-            len(segments),
-            text_preview,
+        debug_event(
+            logger,
+            "reply_prepare",
+            "Preparing text reply",
+            message_type=message_type,
+            text_len=len(text),
+            text_preview=text[:300],
         )
 
         if message_type == "private":
@@ -257,7 +294,14 @@ class NcatNapCatServer:
                 },
             )
             if resp and resp.get("retcode") != 0:
-                logger.warning("send_private_msg failed: %s", resp)
+                warning_event(
+                    logger,
+                    "reply_send_fail",
+                    "send_private_msg failed",
+                    user_id=event.get("user_id"),
+                    action="send_private_msg",
+                    retcode=resp.get("retcode"),
+                )
         elif message_type == "group":
             resp = await self.send_api(
                 "send_group_msg",
@@ -267,7 +311,65 @@ class NcatNapCatServer:
                 },
             )
             if resp and resp.get("retcode") != 0:
-                logger.warning("send_group_msg failed: %s", resp)
+                warning_event(
+                    logger,
+                    "reply_send_fail",
+                    "send_group_msg failed",
+                    group_id=event.get("group_id"),
+                    action="send_group_msg",
+                    retcode=resp.get("retcode"),
+                )
+
+    async def _reply_content(self, event: dict, parts: list[ContentPart]) -> None:
+        """Send a mixed (text+image) reply back to the source of the message event."""
+        message_type = event.get("message_type", "")
+        segments = content_to_onebot(parts)
+
+        text_preview = "".join(p.text for p in parts if p.type == "text")[:300]
+        debug_event(
+            logger,
+            "reply_prepare_content",
+            "Preparing mixed reply content",
+            message_type=message_type,
+            part_count=len(parts),
+            segment_count=len(segments),
+            text_preview=text_preview,
+        )
+
+        if message_type == "private":
+            resp = await self.send_api(
+                "send_private_msg",
+                {
+                    "user_id": event["user_id"],
+                    "message": segments,
+                },
+            )
+            if resp and resp.get("retcode") != 0:
+                warning_event(
+                    logger,
+                    "reply_send_fail",
+                    "send_private_msg failed",
+                    user_id=event.get("user_id"),
+                    action="send_private_msg",
+                    retcode=resp.get("retcode"),
+                )
+        elif message_type == "group":
+            resp = await self.send_api(
+                "send_group_msg",
+                {
+                    "group_id": event["group_id"],
+                    "message": segments,
+                },
+            )
+            if resp and resp.get("retcode") != 0:
+                warning_event(
+                    logger,
+                    "reply_send_fail",
+                    "send_group_msg failed",
+                    group_id=event.get("group_id"),
+                    action="send_group_msg",
+                    retcode=resp.get("retcode"),
+                )
 
     async def send_api(self, action: str, params: dict | None = None) -> dict | None:
         """
@@ -276,7 +378,12 @@ class NcatNapCatServer:
         Returns the response dict, or None if no connection or timeout.
         """
         if self._connection is None:
-            logger.warning("Cannot send API %s: no active connection", action)
+            warning_event(
+                logger,
+                "api_request_dropped",
+                "Cannot send API request without active connection",
+                action=action,
+            )
             return None
 
         echo = str(uuid.uuid4())[:8]
@@ -292,22 +399,43 @@ class NcatNapCatServer:
         self._pending[echo] = future
 
         try:
-            logger.debug("API request: action=%s echo=%s", action, echo)
+            debug_event(
+                logger,
+                "api_request",
+                "Sending OneBot API request",
+                action=action,
+                echo=echo,
+            )
             await self._connection.send(json.dumps(request))
             # Wait for response with 10s timeout
             response = await asyncio.wait_for(future, timeout=10.0)
-            logger.debug(
-                "API response: action=%s status=%s retcode=%s",
-                action,
-                response.get("status"),
-                response.get("retcode"),
+            debug_event(
+                logger,
+                "api_response",
+                "Received OneBot API response",
+                action=action,
+                echo=echo,
+                status=response.get("status"),
+                retcode=response.get("retcode"),
             )
             return response
         except TimeoutError:
-            logger.warning("API call %s timed out", action)
+            warning_event(
+                logger,
+                "api_timeout",
+                "OneBot API call timed out",
+                action=action,
+                echo=echo,
+            )
             self._pending.pop(echo, None)
             return None
         except websockets.ConnectionClosed:
-            logger.warning("Connection closed while waiting for API %s", action)
+            warning_event(
+                logger,
+                "api_connection_closed",
+                "Connection closed while waiting for API response",
+                action=action,
+                echo=echo,
+            )
             self._pending.pop(echo, None)
             return None

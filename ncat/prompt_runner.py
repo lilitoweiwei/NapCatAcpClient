@@ -14,6 +14,7 @@ from ncat.agent_manager import (
     AgentManager,
 )
 from ncat.image_utils import download_image
+from ncat.log import error_event, info_event, warning_event
 from ncat.models import ContentPart, ParsedMessage
 from ncat.prompt_builder import build_prompt_blocks
 
@@ -86,7 +87,7 @@ class PromptRunner:
             # Also send ACP cancel notification to the agent
             cancel_task = asyncio.create_task(self._agent_manager.cancel(chat_id))
             cancel_task.add_done_callback(lambda t: t.result() if not t.cancelled() else None)
-            logger.info("AI task cancelled for %s", chat_id)
+            info_event(logger, "prompt_cancelled", "AI task cancelled", chat_id=chat_id)
             return True
         return False
 
@@ -164,25 +165,44 @@ class PromptRunner:
             has_image = any(p.type == "image" and p.image_base64 for p in response_parts)
             if has_text or has_image:
                 text_len = sum(len(p.text) for p in response_parts if p.type == "text")
-                logger.info(
-                    "Sending AI reply to %s (text=%d chars, parts=%d)",
-                    chat_key,
-                    text_len,
-                    len(response_parts),
+                info_event(
+                    logger,
+                    "reply_ready",
+                    "Sending AI reply",
+                    chat_id=chat_key,
+                    text_len=text_len,
+                    part_count=len(response_parts),
                 )
                 await self._reply_content_fn(event, response_parts)
             else:
-                logger.warning("Agent returned empty content for %s", chat_key)
+                warning_event(
+                    logger,
+                    "reply_empty",
+                    "Agent returned empty content",
+                    chat_id=chat_key,
+                )
                 await self._reply_fn(event, "AI 未返回有效回复")
 
         except asyncio.CancelledError:
             # Cancelled by /stop — notification already sent by the command executor
-            logger.info("AI request cancelled for %s (user /stop)", chat_key)
+            info_event(
+                logger,
+                "prompt_cancelled_user",
+                "AI request cancelled by user",
+                chat_id=chat_key,
+            )
             raise
 
         except AgentErrorWithPartialContent as e:
             # Agent failed mid-stream; send any partial content first, then the error
-            logger.error("AI processing error for %s: %s", chat_key, e.cause, exc_info=True)
+            error_event(
+                logger,
+                "prompt_fail_partial",
+                "AI processing failed after partial output",
+                chat_id=chat_key,
+                err=str(e.cause),
+                exc_info=True,
+            )
             if e.partial_parts:
                 has_text = any(p.type == "text" and p.text for p in e.partial_parts)
                 has_image = any(p.type == "image" and p.image_base64 for p in e.partial_parts)
@@ -206,7 +226,13 @@ class PromptRunner:
 
         except RuntimeError as e:
             # Agent not running (e.g. connection failed or crashed)
-            logger.error("Agent error for %s: %s", chat_key, e)
+            error_event(
+                logger,
+                "agent_error",
+                "Agent runtime error",
+                chat_id=chat_key,
+                err=str(e),
+            )
             if str(e) == MSG_AGENT_NOT_CONNECTED:
                 await self._reply_fn(event, MSG_AGENT_NOT_CONNECTED)
             else:
@@ -217,13 +243,26 @@ class PromptRunner:
 
         except TimeoutError as e:
             # ACP initialize or connection timed out (e.g. agent cold start > timeout)
-            logger.error("Agent connection timeout for %s: %s", chat_key, e)
+            error_event(
+                logger,
+                "agent_connect_timeout",
+                "Agent connection timeout",
+                chat_id=chat_key,
+                err=str(e),
+            )
             await self._reply_fn(
                 event, "连接 Agent 超时，请稍后再试。"
             )
 
         except Exception as e:
-            logger.error("AI processing error for %s: %s", chat_key, e, exc_info=True)
+            error_event(
+                logger,
+                "prompt_fail",
+                "AI processing error",
+                chat_id=chat_key,
+                err=str(e),
+                exc_info=True,
+            )
             await self._reply_fn(
                 event, f"Agent 异常：{e}\n当前会话已关闭，下次对话将自动开启新会话。"
             )
@@ -241,5 +280,10 @@ class PromptRunner:
     async def _send_after_delay(self, event: dict, delay: float, message: str) -> None:
         """Send a notification message after a delay (used for timeout notifications)."""
         await asyncio.sleep(delay)
-        logger.info("Sending timeout notification: %s", message[:50])
+        info_event(
+            logger,
+            "thinking_notice_sent",
+            "Sending timeout notification",
+            msg_preview=message[:50],
+        )
         await self._reply_fn(event, message)

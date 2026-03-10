@@ -8,6 +8,7 @@ import logging
 
 from ncat.agent_manager import AgentManager
 from ncat.command_system import CommandRegistry
+from ncat.log import info_event
 
 logger = logging.getLogger("ncat.command")
 
@@ -59,10 +60,12 @@ async def handle_new(
     await agent_manager.close_session(chat_id)
     await agent_manager.disconnect(chat_id)
     await reply_fn(event, _MSG_NEW_SESSION)
-    logger.info(
-        "New session will be created for %s on next message (workspace=%s)",
-        chat_id,
-        dir,
+    info_event(
+        logger,
+        "command_new",
+        "New session requested",
+        chat_id=chat_id,
+        workspace=dir,
     )
 
 

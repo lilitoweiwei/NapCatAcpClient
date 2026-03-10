@@ -18,6 +18,7 @@ This repo owns the NapCat ACP bridge.
 ## Logging
 
 - Standalone repo-local runs default to `data/logs/`.
+- `ncat.log` is now JSONL structured logs; prefer field-based queries over whole-file reading when tooling is available.
 - In stack-driven integration or deploy runs, stack config redirects ncat logs into centralized workspace log directories.
 
 ## Boundaries

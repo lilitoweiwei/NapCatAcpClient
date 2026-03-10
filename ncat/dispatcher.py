@@ -16,6 +16,7 @@ from ncat.agent_manager import AgentManager
 from ncat.bsp_client import BspClient
 from ncat.command import command_registry, get_help_text
 from ncat.converter import onebot_to_internal
+from ncat.log import debug_event, error_event, info_event, warning_event
 from ncat.models import ContentPart
 from ncat.prompt_runner import PromptRunner
 
@@ -76,9 +77,11 @@ class MessageDispatcher:
         command_registry.set_dependency("bsp_client", bsp_client)
         command_registry.set_dependency("cancel_fn", self._ai.cancel)
 
-        logger.info(
-            "Command system initialized with %d commands",
-            command_registry.get_command_count(),
+        info_event(
+            logger,
+            "command_system_ready",
+            "Command system initialized",
+            command_count=command_registry.get_command_count(),
         )
 
     async def handle_message(self, event: dict, bot_id: int | None = None) -> None:
@@ -111,7 +114,11 @@ class MessageDispatcher:
         try:
             # Step 1: Convert OneBot event to internal message format
             if bot_id is None:
-                logger.warning("Received message before bot_id was available, ignoring")
+                warning_event(
+                    logger,
+                    "message_ignored",
+                    "Received message before bot_id was available",
+                )
                 return
 
             parsed = onebot_to_internal(event, bot_id)
@@ -122,10 +129,13 @@ class MessageDispatcher:
                 return
 
             chat_id = parsed.chat_id
-            logger.debug(
-                "Received message from %s: %s",
-                chat_id,
-                parsed.text[:50] + "..." if len(parsed.text) > 50 else parsed.text,
+            debug_event(
+                logger,
+                "message_received",
+                "Received message",
+                chat_id=chat_id,
+                message_type=parsed.message_type,
+                msg_preview=parsed.text[:50] + "..." if len(parsed.text) > 50 else parsed.text,
             )
 
             # Step 2: Handle /send command specially (strip prefix, forward to AI)
@@ -159,19 +169,23 @@ class MessageDispatcher:
 
             # Step 4: Reject if AI is already processing for this chat
             if self._ai.is_busy(chat_id):
-                logger.info(
-                    "Busy rejection for %s (AI already processing)",
-                    chat_id,
+                info_event(
+                    logger,
+                    "message_rejected_busy",
+                    "Busy rejection while AI is already processing",
+                    chat_id=chat_id,
                 )
                 await self._reply_fn(event, _MSG_BUSY)
                 return
 
             # Step 5: Dispatch to AI prompt runner
             # (connection is established on demand in send_prompt)
-            logger.debug(
-                "Dispatching to AI for %s (agent is_running=%s)",
-                chat_id,
-                self._agent_manager.is_running(chat_id),
+            debug_event(
+                logger,
+                "message_dispatched",
+                "Dispatching message to AI",
+                chat_id=chat_id,
+                agent_running=self._agent_manager.is_running(chat_id),
             )
             await self._ai.process(parsed, event)
 
@@ -179,6 +193,13 @@ class MessageDispatcher:
             # Let cancellation propagate cleanly (don't send error message for /stop)
             raise
         except Exception as e:
-            logger.error("Error handling message: %s", e, exc_info=True)
+            error_event(
+                logger,
+                "message_handle_fail",
+                "Error handling message",
+                chat_id=event.get("user_id") or event.get("group_id"),
+                err=str(e),
+                exc_info=True,
+            )
             with contextlib.suppress(Exception):
                 await self._reply_fn(event, "处理消息时发生内部错误")

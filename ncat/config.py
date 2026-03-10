@@ -82,6 +82,9 @@ class UxConfig:
     thinking_notify_seconds: float = 10
     # Seconds before sending "AI thinking too long, use /stop" notification (0 to disable)
     thinking_long_notify_seconds: float = 30
+    # Max text characters per outbound QQ message; replies longer than this are split.
+    # Set to 0 to disable pre-splitting.
+    max_reply_text_length: int = 5000
     # Timeout (seconds) for downloading images from NapCat-provided URLs
     image_download_timeout: float = 15.0
 

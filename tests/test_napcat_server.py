@@ -87,6 +87,29 @@ async def test_private_message_reply(server_and_mock) -> None:
     assert msg_text == "Mock AI response"
 
 
+async def test_private_message_reply_is_chunked(server_and_mock) -> None:
+    """Long private replies should be split into multiple outbound messages."""
+    server, mock, mock_agent = server_and_mock
+    await asyncio.sleep(0.1)
+
+    server._max_reply_text_length = 5
+    mock_agent.response_text = "abcdefghij"
+
+    await mock.send_private_message(111, "Alice", "hello")
+
+    first_call = await mock.recv_api_call(timeout=5.0)
+    second_call = await mock.recv_api_call(timeout=5.0)
+    third_call = await mock.recv_api_call(timeout=0.2)
+
+    assert first_call is not None
+    assert second_call is not None
+    assert third_call is None
+    assert first_call["action"] == "send_private_msg"
+    assert second_call["action"] == "send_private_msg"
+    assert first_call["params"]["message"][0]["data"]["text"] == "abcde"
+    assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
+
+
 async def test_group_message_ignored_without_at(server_and_mock) -> None:
     """Test that group messages without @bot are ignored."""
     server, mock, _ = server_and_mock

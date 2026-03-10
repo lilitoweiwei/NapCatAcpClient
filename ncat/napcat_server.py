@@ -12,7 +12,7 @@ import websockets
 from websockets.asyncio.server import ServerConnection
 
 from ncat.agent_manager import AgentManager
-from ncat.converter import ai_to_onebot, content_to_onebot
+from ncat.converter import ai_to_onebot_batches, content_to_onebot_batches
 from ncat.dispatcher import MessageDispatcher
 from ncat.log import debug_event, info_event, warning_event
 from ncat.models import ContentPart
@@ -35,6 +35,7 @@ class NcatNapCatServer:
         agent_manager: AgentManager,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
+        max_reply_text_length: int = 5000,
         image_download_timeout: float = 15.0,
         bsp_client=None,
     ) -> None:
@@ -43,6 +44,8 @@ class NcatNapCatServer:
         self._port = port
         # ACP agent manager (needed for session cleanup on disconnect)
         self._agent_manager = agent_manager
+        # Max text characters allowed in a single outbound QQ message.
+        self._max_reply_text_length = max_reply_text_length
 
         # Currently active WebSocket connection from NapCatQQ (only one expected)
         self._connection: ServerConnection | None = None
@@ -205,6 +208,42 @@ class NcatNapCatServer:
 
     # --- Outbound messaging ---
 
+    async def _send_message_batches(
+        self,
+        *,
+        action: str,
+        params: dict,
+        message_batches: list[list[dict]],
+        log_fields: dict,
+    ) -> None:
+        """Send one or more outbound QQ messages in order."""
+        batch_count = len(message_batches)
+        if batch_count > 1:
+            info_event(
+                logger,
+                "reply_chunked",
+                "Splitting outbound QQ reply into multiple messages",
+                action=action,
+                batch_count=batch_count,
+                max_reply_text_length=self._max_reply_text_length,
+                **log_fields,
+            )
+
+        for batch_index, batch in enumerate(message_batches, start=1):
+            resp = await self.send_api(action, {**params, "message": batch})
+            if resp and resp.get("retcode") != 0:
+                warning_event(
+                    logger,
+                    "reply_send_fail",
+                    f"{action} failed",
+                    action=action,
+                    retcode=resp.get("retcode"),
+                    batch_index=batch_index,
+                    batch_count=batch_count,
+                    **log_fields,
+                )
+                return
+
     async def send_qq_reply(self, chat_id: str, text: str) -> None:
         """Send a QQ reply to the specified chat ID.
 
@@ -215,23 +254,16 @@ class NcatNapCatServer:
             chat_id: QQ chat ID in internal format: "private:{user_id}" or "group:{group_id}"
             text: Reply text
         """
-        segments = ai_to_onebot(text)
+        message_batches = ai_to_onebot_batches(text, self._max_reply_text_length)
         if chat_id.startswith("private:"):
             try:
                 user_id = int(chat_id.split(":", 1)[1])
-                resp = await self.send_api(
-                    "send_private_msg",
-                    {"user_id": user_id, "message": segments},
+                await self._send_message_batches(
+                    action="send_private_msg",
+                    params={"user_id": user_id},
+                    message_batches=message_batches,
+                    log_fields={"chat_id": chat_id},
                 )
-                if resp and resp.get("retcode") != 0:
-                    warning_event(
-                        logger,
-                        "reply_send_fail",
-                        "send_private_msg failed",
-                        chat_id=chat_id,
-                        action="send_private_msg",
-                        retcode=resp.get("retcode"),
-                    )
             except ValueError:
                 warning_event(
                     logger,
@@ -242,19 +274,12 @@ class NcatNapCatServer:
         elif chat_id.startswith("group:"):
             try:
                 group_id = int(chat_id.split(":", 1)[1])
-                resp = await self.send_api(
-                    "send_group_msg",
-                    {"group_id": group_id, "message": segments},
+                await self._send_message_batches(
+                    action="send_group_msg",
+                    params={"group_id": group_id},
+                    message_batches=message_batches,
+                    log_fields={"chat_id": chat_id},
                 )
-                if resp and resp.get("retcode") != 0:
-                    warning_event(
-                        logger,
-                        "reply_send_fail",
-                        "send_group_msg failed",
-                        chat_id=chat_id,
-                        action="send_group_msg",
-                        retcode=resp.get("retcode"),
-                    )
             except ValueError:
                 warning_event(
                     logger,
@@ -273,7 +298,7 @@ class NcatNapCatServer:
     async def _reply_text(self, event: dict, text: str) -> None:
         """Send a text reply back to the source of the message event."""
         message_type = event.get("message_type", "")
-        segments = ai_to_onebot(text)
+        message_batches = ai_to_onebot_batches(text, self._max_reply_text_length)
 
         # Log the reply text at DEBUG (may be long)
         debug_event(
@@ -282,48 +307,29 @@ class NcatNapCatServer:
             "Preparing text reply",
             message_type=message_type,
             text_len=len(text),
+            batch_count=len(message_batches),
             text_preview=text[:300],
         )
 
         if message_type == "private":
-            resp = await self.send_api(
-                "send_private_msg",
-                {
-                    "user_id": event["user_id"],
-                    "message": segments,
-                },
+            await self._send_message_batches(
+                action="send_private_msg",
+                params={"user_id": event["user_id"]},
+                message_batches=message_batches,
+                log_fields={"user_id": event.get("user_id")},
             )
-            if resp and resp.get("retcode") != 0:
-                warning_event(
-                    logger,
-                    "reply_send_fail",
-                    "send_private_msg failed",
-                    user_id=event.get("user_id"),
-                    action="send_private_msg",
-                    retcode=resp.get("retcode"),
-                )
         elif message_type == "group":
-            resp = await self.send_api(
-                "send_group_msg",
-                {
-                    "group_id": event["group_id"],
-                    "message": segments,
-                },
+            await self._send_message_batches(
+                action="send_group_msg",
+                params={"group_id": event["group_id"]},
+                message_batches=message_batches,
+                log_fields={"group_id": event.get("group_id")},
             )
-            if resp and resp.get("retcode") != 0:
-                warning_event(
-                    logger,
-                    "reply_send_fail",
-                    "send_group_msg failed",
-                    group_id=event.get("group_id"),
-                    action="send_group_msg",
-                    retcode=resp.get("retcode"),
-                )
 
     async def _reply_content(self, event: dict, parts: list[ContentPart]) -> None:
         """Send a mixed (text+image) reply back to the source of the message event."""
         message_type = event.get("message_type", "")
-        segments = content_to_onebot(parts)
+        message_batches = content_to_onebot_batches(parts, self._max_reply_text_length)
 
         text_preview = "".join(p.text for p in parts if p.type == "text")[:300]
         debug_event(
@@ -332,44 +338,24 @@ class NcatNapCatServer:
             "Preparing mixed reply content",
             message_type=message_type,
             part_count=len(parts),
-            segment_count=len(segments),
+            batch_count=len(message_batches),
             text_preview=text_preview,
         )
 
         if message_type == "private":
-            resp = await self.send_api(
-                "send_private_msg",
-                {
-                    "user_id": event["user_id"],
-                    "message": segments,
-                },
+            await self._send_message_batches(
+                action="send_private_msg",
+                params={"user_id": event["user_id"]},
+                message_batches=message_batches,
+                log_fields={"user_id": event.get("user_id")},
             )
-            if resp and resp.get("retcode") != 0:
-                warning_event(
-                    logger,
-                    "reply_send_fail",
-                    "send_private_msg failed",
-                    user_id=event.get("user_id"),
-                    action="send_private_msg",
-                    retcode=resp.get("retcode"),
-                )
         elif message_type == "group":
-            resp = await self.send_api(
-                "send_group_msg",
-                {
-                    "group_id": event["group_id"],
-                    "message": segments,
-                },
+            await self._send_message_batches(
+                action="send_group_msg",
+                params={"group_id": event["group_id"]},
+                message_batches=message_batches,
+                log_fields={"group_id": event.get("group_id")},
             )
-            if resp and resp.get("retcode") != 0:
-                warning_event(
-                    logger,
-                    "reply_send_fail",
-                    "send_group_msg failed",
-                    group_id=event.get("group_id"),
-                    action="send_group_msg",
-                    retcode=resp.get("retcode"),
-                )
 
     async def send_api(self, action: str, params: dict | None = None) -> dict | None:
         """

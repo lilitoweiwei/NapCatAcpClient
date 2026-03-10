@@ -88,6 +88,7 @@ async def main() -> None:
         agent_manager=agent_manager,
         thinking_notify_seconds=config.ux.thinking_notify_seconds,
         thinking_long_notify_seconds=config.ux.thinking_long_notify_seconds,
+        max_reply_text_length=config.ux.max_reply_text_length,
         image_download_timeout=config.ux.image_download_timeout,
         bsp_client=bsp_client,
     )

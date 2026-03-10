@@ -93,6 +93,66 @@ def content_to_onebot(parts: list[ContentPart]) -> list[dict]:
     return segments or [{"type": "text", "data": {"text": ""}}]
 
 
+def split_text_for_onebot(text: str, max_text_length: int) -> list[str]:
+    """Split text into QQ-safe chunks by character count."""
+    if max_text_length <= 0 or not text or len(text) <= max_text_length:
+        return [text]
+
+    return [text[i : i + max_text_length] for i in range(0, len(text), max_text_length)]
+
+
+def split_content_parts_for_onebot(
+    parts: list[ContentPart],
+    max_text_length: int,
+) -> list[list[ContentPart]]:
+    """Split ordered content parts into multiple outbound QQ messages."""
+    if max_text_length <= 0:
+        return [parts]
+    if not parts:
+        return [[]]
+
+    batches: list[list[ContentPart]] = []
+    current_batch: list[ContentPart] = []
+    current_text_length = 0
+
+    def flush() -> None:
+        nonlocal current_batch, current_text_length
+        if current_batch:
+            batches.append(current_batch)
+            current_batch = []
+            current_text_length = 0
+
+    for part in parts:
+        if part.type == "image":
+            current_batch.append(part)
+            continue
+
+        if part.type != "text" or not part.text:
+            continue
+
+        remaining_text = part.text
+        while remaining_text:
+            if current_text_length >= max_text_length:
+                flush()
+
+            remaining_capacity = max_text_length - current_text_length
+            text_chunk = remaining_text[:remaining_capacity]
+            current_batch.append(ContentPart(type="text", text=text_chunk))
+            current_text_length += len(text_chunk)
+            remaining_text = remaining_text[remaining_capacity:]
+
+            if remaining_text:
+                flush()
+
+    flush()
+    return batches or [parts]
+
+
+def content_to_onebot_batches(parts: list[ContentPart], max_text_length: int) -> list[list[dict]]:
+    """Convert content parts into one or more outbound OneBot message payloads."""
+    return [content_to_onebot(batch) for batch in split_content_parts_for_onebot(parts, max_text_length)]
+
+
 def ai_to_onebot(text: str) -> list[dict]:
     """
     Convert AI response text to OneBot 11 message segment array.
@@ -100,3 +160,8 @@ def ai_to_onebot(text: str) -> list[dict]:
     v1 simply wraps the text in a single text segment.
     """
     return content_to_onebot([ContentPart(type="text", text=text)])
+
+
+def ai_to_onebot_batches(text: str, max_text_length: int) -> list[list[dict]]:
+    """Convert AI text into one or more outbound OneBot message payloads."""
+    return [ai_to_onebot(chunk) for chunk in split_text_for_onebot(text, max_text_length)]

@@ -2,7 +2,13 @@
 
 from acp.schema import ImageContentBlock, TextContentBlock
 
-from ncat.converter import ai_to_onebot, content_to_onebot, onebot_to_internal
+from ncat.converter import (
+    ai_to_onebot,
+    ai_to_onebot_batches,
+    content_to_onebot,
+    content_to_onebot_batches,
+    onebot_to_internal,
+)
 from ncat.models import ContentPart
 from ncat.prompt_builder import build_context_header, build_prompt_blocks
 
@@ -154,6 +160,15 @@ def test_ai_to_onebot() -> None:
     assert result == [{"type": "text", "data": {"text": "Hello world"}}]
 
 
+def test_ai_to_onebot_batches_split_long_text() -> None:
+    result = ai_to_onebot_batches("abcdefghij", 4)
+    assert result == [
+        [{"type": "text", "data": {"text": "abcd"}}],
+        [{"type": "text", "data": {"text": "efgh"}}],
+        [{"type": "text", "data": {"text": "ij"}}],
+    ]
+
+
 def test_content_to_onebot_text_and_image() -> None:
     parts = [
         ContentPart(type="text", text="hi"),
@@ -165,6 +180,22 @@ def test_content_to_onebot_text_and_image() -> None:
         {"type": "text", "data": {"text": "hi"}},
         {"type": "image", "data": {"file": "base64://aGVsbG8="}},
         {"type": "text", "data": {"text": "bye"}},
+    ]
+
+
+def test_content_to_onebot_batches_split_text_and_preserve_order() -> None:
+    parts = [
+        ContentPart(type="text", text="hello"),
+        ContentPart(type="image", image_base64="aGVsbG8=", image_mime="image/png"),
+        ContentPart(type="text", text="world"),
+    ]
+    segments = content_to_onebot_batches(parts, 5)
+    assert segments == [
+        [
+            {"type": "text", "data": {"text": "hello"}},
+            {"type": "image", "data": {"file": "base64://aGVsbG8="}},
+        ],
+        [{"type": "text", "data": {"text": "world"}}],
     ]
 
 

@@ -183,6 +183,29 @@ async def test_full_group_conversation(full_stack) -> None:
     assert "user Bob(333)]" in prompt
 
 
+async def test_long_group_reply_is_chunked(full_stack) -> None:
+    """Integration test: long group replies are split into multiple QQ messages."""
+    server, mock, mock_agent = full_stack
+    server._max_reply_text_length = 5
+    mock_agent.response_parts = [ContentPart(type="text", text="abcdefghij")]
+
+    await mock.send_group_message(222, "DevGroup", 333, "Bob", " write a function", at_bot=True)
+
+    first_call = await mock.recv_api_call(timeout=5.0)
+    second_call = await mock.recv_api_call(timeout=5.0)
+    third_call = await mock.recv_api_call(timeout=0.2)
+
+    assert first_call is not None
+    assert second_call is not None
+    assert third_call is None
+    assert first_call["action"] == "send_group_msg"
+    assert second_call["action"] == "send_group_msg"
+    assert first_call["params"]["group_id"] == 222
+    assert second_call["params"]["group_id"] == 222
+    assert first_call["params"]["message"][0]["data"]["text"] == "abcde"
+    assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
+
+
 async def test_new_command_closes_session(full_stack) -> None:
     """Test that /new closes session and next message creates a new one."""
     server, mock, mock_agent = full_stack

@@ -58,6 +58,9 @@ client_id = "ncat"
 thinking_notify_seconds = 10
 # Seconds before sending "AI is thinking too long, use /stop" notification (0 to disable).
 thinking_long_notify_seconds = 30
+# Max text characters per outbound QQ message before ncat splits a long reply.
+# Set to 0 to disable pre-splitting.
+max_reply_text_length = 5000
 # Timeout (seconds) for downloading images from NapCat-provided URLs.
 image_download_timeout = 15.0
 

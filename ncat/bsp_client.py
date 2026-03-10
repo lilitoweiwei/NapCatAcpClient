@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from ncat.log import debug_event
+
 logger = logging.getLogger("ncat.bsp_client")
 
 
@@ -61,6 +63,8 @@ class BspClient:
         if name:
             payload["name"] = name
 
+        debug_event(logger, "bsp_create_session", "Creating background session", notify_chat=notify_chat, bg_name=name)
+
         resp = await self._client.post(
             f"{self.base_url}/sessions",
             json=payload,
@@ -78,6 +82,7 @@ class BspClient:
         Raises:
             httpx.HTTPError: If the request fails
         """
+        debug_event(logger, "bsp_list_sessions", "Listing background sessions")
         resp = await self._client.get(f"{self.base_url}/sessions")
         resp.raise_for_status()
         data = resp.json()
@@ -95,6 +100,7 @@ class BspClient:
         Raises:
             httpx.HTTPError: If the request fails (404 if not found)
         """
+        debug_event(logger, "bsp_get_session", "Getting background session", bg_name=name)
         resp = await self._client.get(f"{self.base_url}/sessions/{name}")
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
@@ -109,6 +115,7 @@ class BspClient:
         Raises:
             httpx.HTTPError: If the request fails (404 if not found, 409 if running)
         """
+        debug_event(logger, "bsp_send_prompt", "Sending background prompt", bg_name=name)
         resp = await self._client.post(
             f"{self.base_url}/sessions/{name}/prompt",
             json={"prompt": prompt},
@@ -124,6 +131,7 @@ class BspClient:
         Raises:
             httpx.HTTPError: If the request fails (404 if not found)
         """
+        debug_event(logger, "bsp_delete_session", "Deleting background session", bg_name=name)
         resp = await self._client.delete(f"{self.base_url}/sessions/{name}")
         resp.raise_for_status()
 
@@ -139,6 +147,7 @@ class BspClient:
         Raises:
             httpx.HTTPError: If the request fails (404 if not found)
         """
+        debug_event(logger, "bsp_get_history", "Getting background session history", bg_name=name)
         resp = await self._client.get(f"{self.base_url}/sessions/{name}/history")
         resp.raise_for_status()
         data = resp.json()
@@ -156,6 +165,7 @@ class BspClient:
         Raises:
             httpx.HTTPError: If the request fails (404 if not found)
         """
+        debug_event(logger, "bsp_get_last", "Getting background session last message", bg_name=name)
         resp = await self._client.get(f"{self.base_url}/sessions/{name}/last")
         if resp.status_code == 204:
             return None

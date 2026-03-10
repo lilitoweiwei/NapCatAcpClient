@@ -29,6 +29,8 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from ncat.log import debug_event, error_event, info_event
+
 logger = logging.getLogger("ncat.command_system")
 
 # Type alias for command handler functions
@@ -104,7 +106,13 @@ class CommandRegistry:
                     name=name,
                 )
             )
-            logger.debug("Registered command: %s (pattern: %s)", name, pattern)
+            debug_event(
+                logger,
+                "command_registered",
+                "Registered command",
+                command_name=name,
+                pattern=pattern,
+            )
             return func
 
         return decorator
@@ -137,7 +145,7 @@ class CommandRegistry:
         for cmd in self._commands:
             match = re.match(cmd.pattern, text)
             if match:
-                logger.info("Executing command: %s", cmd.name)
+                info_event(logger, "command_execute", "Executing command", command_name=cmd.name)
 
                 # Merge matched groups with context dependencies
                 kwargs = {**match.groupdict(), **self._dependencies, **context}
@@ -146,7 +154,14 @@ class CommandRegistry:
                     await cmd.handler(**kwargs)
                     return True
                 except Exception as e:
-                    logger.exception("Error executing command %s: %s", cmd.name, e)
+                    error_event(
+                        logger,
+                        "command_execute_fail",
+                        "Error executing command",
+                        command_name=cmd.name,
+                        err=str(e),
+                        exc_info=True,
+                    )
                     # Don't return False here - let the caller handle error messages
                     raise
 

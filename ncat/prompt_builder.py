@@ -9,6 +9,7 @@ import logging
 from acp import image_block, text_block
 from acp.schema import ImageContentBlock, TextContentBlock
 
+from ncat.log import warning_event
 from ncat.models import ParsedMessage
 
 logger = logging.getLogger("ncat.prompt_builder")
@@ -39,10 +40,12 @@ def _replace_image_placeholders(text: str, replacements: list[str]) -> str:
     marker = "[图片]"
     placeholder_count = text.count(marker)
     if placeholder_count > len(replacements):
-        logger.warning(
-            "More image placeholders than attachments: placeholders=%d attachments=%d",
-            placeholder_count,
-            len(replacements),
+        warning_event(
+            logger,
+            "prompt_image_placeholder_mismatch",
+            "More image placeholders than attachments",
+            placeholder_count=placeholder_count,
+            attachment_count=len(replacements),
         )
 
     out: list[str] = []
@@ -64,11 +67,12 @@ def _replace_image_placeholders(text: str, replacements: list[str]) -> str:
         extra = "\n".join(replacements[used:])
         sep = "\n" if result and not result.endswith("\n") else ""
         result = f"{result}{sep}{extra}"
-        logger.warning(
-            "More attachments than image placeholders; appended extras: "
-            "placeholders=%d attachments=%d",
-            placeholder_count,
-            len(replacements),
+        warning_event(
+            logger,
+            "prompt_image_attachment_extra",
+            "More attachments than image placeholders; appended extras",
+            placeholder_count=placeholder_count,
+            attachment_count=len(replacements),
         )
 
     return result

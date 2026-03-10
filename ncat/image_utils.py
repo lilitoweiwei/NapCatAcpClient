@@ -12,6 +12,8 @@ import mimetypes
 
 import httpx
 
+from ncat.log import warning_event
+
 logger = logging.getLogger("ncat.image_utils")
 
 
@@ -48,5 +50,11 @@ async def download_image(url: str, timeout_seconds: float) -> tuple[str, str] | 
             data_b64 = base64.b64encode(resp.content).decode("ascii")
             return data_b64, mime_type
     except (httpx.RequestError, httpx.HTTPStatusError) as e:
-        logger.warning("Failed to download image, will fall back to URL: %s (%s)", url, e)
+        warning_event(
+            logger,
+            "image_download_fail",
+            "Failed to download image; falling back to URL",
+            url=url,
+            err=str(e),
+        )
         return None

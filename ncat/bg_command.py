@@ -10,6 +10,7 @@ import httpx
 
 from ncat.bsp_client import BspClient
 from ncat.command import command_registry
+from ncat.log import error_event
 
 logger = logging.getLogger("ncat.bg_command")
 
@@ -68,7 +69,7 @@ async def handle_bg_new(
         )
         await reply_fn(event, f"后台任务已创建，ID: {name}")
     except httpx.HTTPError as e:
-        logger.error("Failed to create session: %s", e)
+        error_event(logger, "bg_create_fail", "Failed to create background session", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"创建失败：{e}")
 
 
@@ -96,7 +97,7 @@ async def handle_bg_newn(
         )
         await reply_fn(event, f"后台任务已创建，ID: {final_name}")
     except httpx.HTTPError as e:
-        logger.error("Failed to create session with name: %s", e)
+        error_event(logger, "bg_create_named_fail", "Failed to create named background session", chat_id=chat_id, bg_name=name, err=str(e))
         await reply_fn(event, f"创建失败：{e}")
 
 
@@ -133,7 +134,7 @@ async def handle_bg_ls(
             )
         await reply_fn(event, "\n".join(lines))
     except httpx.HTTPError as e:
-        logger.error("Failed to list sessions: %s", e)
+        error_event(logger, "bg_list_fail", "Failed to list background sessions", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"获取列表失败：{e}")
 
 
@@ -173,7 +174,7 @@ async def handle_bg_to_index(
         else:
             await reply_fn(event, f"发送失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to send prompt: %s", e)
+        error_event(logger, "bg_prompt_index_fail", "Failed to send prompt to background session by index", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"发送失败：{e}")
 
 
@@ -203,7 +204,7 @@ async def handle_bg_to_name(
         else:
             await reply_fn(event, f"发送失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to send prompt: %s", e)
+        error_event(logger, "bg_prompt_name_fail", "Failed to send prompt to background session by name", chat_id=chat_id, bg_name=name, err=str(e))
         await reply_fn(event, f"发送失败：{e}")
 
 
@@ -238,7 +239,7 @@ async def handle_bg_stop_index(
         else:
             await reply_fn(event, f"停止失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to stop session: %s", e)
+        error_event(logger, "bg_stop_index_fail", "Failed to stop background session by index", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"停止失败：{e}")
 
 
@@ -265,7 +266,7 @@ async def handle_bg_stop_name(
         else:
             await reply_fn(event, f"停止失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to stop session: %s", e)
+        error_event(logger, "bg_stop_name_fail", "Failed to stop background session by name", chat_id=chat_id, bg_name=name, err=str(e))
         await reply_fn(event, f"停止失败：{e}")
 
 
@@ -299,7 +300,7 @@ async def handle_bg_stop_wait(
             event, f"已停止 {len(stopped)} 个等待中的会话：{', '.join(stopped)}"
         )
     except httpx.HTTPError as e:
-        logger.error("Failed to stop waiting sessions: %s", e)
+        error_event(logger, "bg_stop_wait_fail", "Failed to stop waiting background sessions", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"停止失败：{e}")
 
 
@@ -330,7 +331,7 @@ async def handle_bg_stop_all(
 
         await reply_fn(event, f"已停止所有 {len(stopped)} 个会话：{', '.join(stopped)}")
     except httpx.HTTPError as e:
-        logger.error("Failed to stop all sessions: %s", e)
+        error_event(logger, "bg_stop_all_fail", "Failed to stop all background sessions", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"停止失败：{e}")
 
 
@@ -382,7 +383,7 @@ async def handle_bg_history_index(
         else:
             await reply_fn(event, f"获取历史失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to get history: %s", e)
+        error_event(logger, "bg_history_index_fail", "Failed to get background history by index", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"获取历史失败：{e}")
 
 
@@ -425,7 +426,7 @@ async def handle_bg_history_name(
         else:
             await reply_fn(event, f"获取历史失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to get history: %s", e)
+        error_event(logger, "bg_history_name_fail", "Failed to get background history by name", chat_id=chat_id, bg_name=name, err=str(e))
         await reply_fn(event, f"获取历史失败：{e}")
 
 
@@ -469,7 +470,7 @@ async def handle_bg_last_index(
         else:
             await reply_fn(event, f"获取失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to get last message: %s", e)
+        error_event(logger, "bg_last_index_fail", "Failed to get background last message by index", chat_id=chat_id, err=str(e))
         await reply_fn(event, f"获取失败：{e}")
 
 
@@ -504,5 +505,5 @@ async def handle_bg_last_name(
         else:
             await reply_fn(event, f"获取失败：{e}")
     except httpx.HTTPError as e:
-        logger.error("Failed to get last message: %s", e)
+        error_event(logger, "bg_last_name_fail", "Failed to get background last message by name", chat_id=chat_id, bg_name=name, err=str(e))
         await reply_fn(event, f"获取失败：{e}")

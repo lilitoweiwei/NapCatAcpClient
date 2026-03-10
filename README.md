@@ -39,7 +39,9 @@ uv run python main.py /path/to/your.toml
 
 其他诸如日志目录、UX 体验优化、网络端口等丰富配置，请直接阅读 `config.example.toml` 中的注释，默认配置即可运行。
 
-**持久化数据**：ncat 运行过程中产生的持久化数据主要有日志文件和工作区目录。它们均可在 `config.toml` 中指定（`[logging] dir` 和 `[agent] workspace_root`）。单独运行时，日志默认落在 `data/logs/`；被 `stack` 托管时，推荐改为工作区集中日志目录。当前 `ncat.log` 已采用一行一个 JSON 对象的结构化日志格式，适合后续按字段查询。
+**持久化数据**：ncat 运行过程中产生的持久化数据主要有日志文件和工作区目录。它们均可在 `config.toml` 中指定（`[logging] dir` 和 `[agent] workspace_root`）。单独运行时，日志默认落在 `data/logs/`。当前 `ncat.log` 已采用一行一个 JSON 对象的结构化日志格式，适合后续按字段查询。
+
+**MCP servers**：如果目标 ACP agent 支持在 `session/new` 时接收 MCP server 配置，可以在 `[[mcp]]` 中声明额外的 MCP servers。当前 `ncat` 仅负责把这些配置透传给 ACP session，不负责某个具体 MCP server 的实现、文档或部署说明。
 
 ## 指令系统
 

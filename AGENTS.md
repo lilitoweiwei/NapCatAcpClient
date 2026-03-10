@@ -19,11 +19,9 @@ This repo owns the NapCat ACP bridge.
 
 - Standalone repo-local runs default to `data/logs/`.
 - `ncat.log` is now JSONL structured logs; prefer field-based queries over whole-file reading when tooling is available.
-- In stack-driven integration or deploy runs, stack config redirects ncat logs into centralized workspace log directories.
 
 ## Boundaries
 
 - Keep this repo focused on QQ message flow, session orchestration, and ACP transport.
-- Do not make this repo depend on sibling repos; cross-repo wiring belongs in `stack/`.
 - Use `[agent].workspace_root` and `[agent].default_workspace` for workspace selection; do not add `[agent].cwd` back.
 - The current foreground model is one chat -> one agent subprocess -> one ACP session until `/new` or a hard failure.

@@ -24,18 +24,14 @@ default_workspace = "default"
 # ANTHROPIC_API_KEY = "your-api-key-here"
 # HTTPS_PROXY = "http://127.0.0.1:7890"
 
-# NapCat MCP (SSE, when running as a separate service)
+# Example stdio MCP server.
 # [[mcp]]
-# name = "napcat_mcp"
-# transport = "sse"
-# url = "http://localhost:8937/sse"
-
-# NapCat MCP (STDIO, when Agent and MCP run in same container; requires FAG allow_stdio = true)
-# [[mcp]]
-# name = "napcat_mcp"
+# name = "example_mcp"
 # transport = "stdio"
-# command = "uv"
-# args = ["run", "--project", "/app/NapCatMCP", "python", "-m", "src.napcat_mcp.main", "--transport", "stdio"]
+# command = "python"
+# args = ["-m", "example_mcp_server"]
+# [mcp.env]
+# EXAMPLE_API_KEY = "your-api-key-here"
 
 # [[mcp]]
 # name = "filesystem"

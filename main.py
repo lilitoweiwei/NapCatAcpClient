@@ -69,6 +69,7 @@ async def main() -> None:
         workspace_root=str(workspace_root),
         default_workspace=config.agent.default_workspace,
         env=config.agent.env or None,
+        log_extra_context_env_var=config.agent.log_extra_context_env_var,
         mcp_servers=config.mcp,
         initialize_timeout_seconds=config.agent.initialize_timeout_seconds,
         retry_interval_seconds=config.agent.retry_interval_seconds,

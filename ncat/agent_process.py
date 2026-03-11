@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import os
+import secrets
 import shutil
 import sys
 from typing import Any, cast
@@ -97,6 +98,7 @@ class AgentProcess:
         args: list[str],
         cwd: str,
         env: dict[str, str] | None = None,
+        log_extra_context_env_var: str | None = None,
     ) -> None:
         # Agent executable and arguments
         self._command = command
@@ -105,6 +107,7 @@ class AgentProcess:
         self._cwd = cwd
         # Extra environment variables (merged with system env at start time)
         self._extra_env = env or {}
+        self._log_extra_context_env_var = log_extra_context_env_var
 
         # Agent subprocess handle
         self._process: aio_subprocess.Process | None = None
@@ -142,7 +145,41 @@ class AgentProcess:
         """Whether the connected agent supports image blocks in prompts."""
         return self._supports_image
 
-    async def start_once(self, client: Client, timeout: float) -> None:
+    @property
+    def log_extra_context_env_var(self) -> str | None:
+        """Configured env var name used to pass wrapper log context."""
+        return self._log_extra_context_env_var
+
+    def build_log_extra_context(
+        self,
+        *,
+        chat_id: str,
+        workspace_name: str,
+        spawn_id: str | None = None,
+    ) -> tuple[str | None, dict[str, Any]]:
+        """Build extra structured log context for wrapper-side logging."""
+        if not self._log_extra_context_env_var:
+            return None, {}
+
+        payload = {
+            "workspace": os.environ.get("SUZU_WORKSPACE", workspace_name),
+            "workspace_name": workspace_name,
+            "chat_id": chat_id,
+            "spawn_id": spawn_id or f"spawn_{secrets.token_hex(8)}",
+            "agent_cwd": self._cwd,
+            "agent_command": self._command,
+        }
+        return self._log_extra_context_env_var, payload
+
+    async def start_once(
+        self,
+        client: Client,
+        timeout: float,
+        *,
+        chat_id: str,
+        workspace_name: str,
+        spawn_id: str | None = None,
+    ) -> tuple[str | None, dict[str, Any]]:
         """One-shot: start agent subprocess and complete ACP initialize with timeout.
 
         Cleans up any existing process/connection first. On timeout or any
@@ -157,6 +194,7 @@ class AgentProcess:
             command=self._command,
             cmd_args=self._args,
             cwd=self._cwd,
+            chat_id=chat_id,
         )
 
         proc_env: dict[str, str] | None = None
@@ -167,6 +205,25 @@ class AgentProcess:
                 "agent_env_override",
                 "Agent extra environment variables configured",
                 env_keys=sorted(self._extra_env.keys()),
+            )
+
+        extra_context_env_var, extra_context = self.build_log_extra_context(
+            chat_id=chat_id,
+            workspace_name=workspace_name,
+            spawn_id=spawn_id,
+        )
+        if extra_context_env_var and extra_context:
+            if proc_env is None:
+                proc_env = dict(os.environ)
+            proc_env[extra_context_env_var] = json.dumps(extra_context, ensure_ascii=False)
+            info_event(
+                logger,
+                "agent_log_context_env",
+                "Configured agent wrapper log context env",
+                chat_id=chat_id,
+                env_var=extra_context_env_var,
+                context_keys=sorted(extra_context.keys()),
+                spawn_id=extra_context.get("spawn_id"),
             )
 
         resolved = shutil.which(self._command)
@@ -251,6 +308,7 @@ class AgentProcess:
             "ACP prompt capabilities detected",
             supports_image=self._supports_image,
         )
+        return extra_context_env_var, extra_context
 
     async def wait(self) -> None:
         """Wait for the agent subprocess to exit (e.g. after connection is lost)."""

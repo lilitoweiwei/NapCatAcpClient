@@ -90,6 +90,7 @@ def _manager(tmp_path: Path) -> AgentManager:
         args=[],
         workspace_root=str(tmp_path),
         default_workspace="default",
+        log_extra_context_env_var="SUZU_WRAPPER_EXTRA_LOG",
     )
 
 
@@ -137,16 +138,49 @@ async def test_ensure_connection_creates_workspace_before_start(
     manager.set_next_session_cwd("private:1", "nested/project")
     started_in: list[Path] = []
 
-    async def fake_start_once(self: AgentProcess, client, timeout: float) -> None:
+    async def fake_start_once(
+        self: AgentProcess,
+        client,
+        timeout: float,
+        *,
+        chat_id: str,
+        workspace_name: str,
+        spawn_id: str | None = None,
+    ) -> tuple[str | None, dict[str, Any]]:
         cwd = Path(self.cwd)
         started_in.append(cwd)
         assert cwd.is_dir()
+        return self._log_extra_context_env_var, {
+            "chat_id": chat_id,
+            "workspace_name": workspace_name,
+            "spawn_id": spawn_id or "spawn_test",
+        }
 
     monkeypatch.setattr(AgentProcess, "start_once", fake_start_once)
 
     await manager.ensure_connection("private:1")
 
     assert started_in == [tmp_path / "nested/project"]
+    conn = manager._connections["private:1"]
+    assert conn.spawn_id is not None
+    assert conn.extra_log_context["chat_id"] == "private:1"
+    assert conn.extra_log_context["workspace_name"] == "nested/project"
+
+
+def test_build_log_extra_context_requires_json_env_name(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+
+    env_var, payload = conn.agent_process.build_log_extra_context(
+        chat_id="private:1",
+        workspace_name="default",
+        spawn_id="spawn_fixed",
+    )
+
+    assert env_var == "SUZU_WRAPPER_EXTRA_LOG"
+    assert payload["chat_id"] == "private:1"
+    assert payload["workspace_name"] == "default"
+    assert payload["spawn_id"] == "spawn_fixed"
 
 
 @pytest.mark.asyncio
@@ -266,9 +300,22 @@ async def test_ensure_connection_does_not_create_session(
     manager = _manager(tmp_path)
     new_session_called = False
 
-    async def fake_start_once(self: AgentProcess, client, timeout: float) -> None:
+    async def fake_start_once(
+        self: AgentProcess,
+        client,
+        timeout: float,
+        *,
+        chat_id: str,
+        workspace_name: str,
+        spawn_id: str | None = None,
+    ) -> tuple[str | None, dict[str, Any]]:
         self._conn = DummyAcpConnection()
         self._process = cast(Any, DummyProcess())
+        return self._log_extra_context_env_var, {
+            "chat_id": chat_id,
+            "workspace_name": workspace_name,
+            "spawn_id": spawn_id or "spawn_test",
+        }
 
     async def fake_create_session(chat_id: str) -> str:
         nonlocal new_session_called

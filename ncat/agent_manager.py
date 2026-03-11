@@ -58,6 +58,7 @@ class AgentManager:
         workspace_root: str,
         default_workspace: str,
         env: dict[str, str] | None = None,
+        log_extra_context_env_var: str | None = None,
         mcp_servers: list[McpServerConfig] | None = None,
         initialize_timeout_seconds: float = 30.0,
         retry_interval_seconds: float = 10.0,
@@ -68,6 +69,7 @@ class AgentManager:
         self._default_workspace = default_workspace
         self._default_workspace_path = self._resolve_workspace_path(default_workspace)
         self._env = env
+        self._log_extra_context_env_var = log_extra_context_env_var
         self._initialize_timeout_seconds = initialize_timeout_seconds
         self._retry_interval_seconds = retry_interval_seconds
         self._mcp_servers = mcp_servers or []
@@ -113,6 +115,13 @@ class AgentManager:
             return conn.workspace_cwd
         return self._next_session_cwd.get(chat_id, self._default_workspace_path)
 
+    def _workspace_name_from_cwd(self, cwd: str) -> str:
+        """Return the workspace-relative name for a resolved cwd."""
+        try:
+            return Path(cwd).resolve().relative_to(self._workspace_root).as_posix()
+        except ValueError:
+            return Path(cwd).name
+
     def _get_or_create_connection(self, chat_id: str) -> AgentConnection:
         """Get or create an AgentConnection for the given chat_id.
 
@@ -126,6 +135,7 @@ class AgentManager:
                 args=self._args,
                 cwd=workspace_cwd,
                 env=self._env,
+                log_extra_context_env_var=self._log_extra_context_env_var,
             )
             acp_client = NcatAcpClient(agent_manager=self, chat_id=chat_id)
             connection = AgentConnection(
@@ -170,6 +180,15 @@ class AgentManager:
             conn.turn_update_count = 0
             conn.active_prompt = False
             conn.workspace_cwd = self._get_connection_cwd(chat_id)
+            workspace_name = self._workspace_name_from_cwd(conn.workspace_cwd)
+            _, extra_context = conn.agent_process.build_log_extra_context(
+                chat_id=chat_id,
+                workspace_name=workspace_name,
+                spawn_id=conn.spawn_id,
+            )
+            if not conn.spawn_id:
+                conn.spawn_id = str(extra_context.get("spawn_id") or "") or None
+            conn.extra_log_context = dict(extra_context)
             Path(conn.workspace_cwd).mkdir(parents=True, exist_ok=True)
             conn.agent_process.set_cwd(conn.workspace_cwd)
             info_event(
@@ -178,16 +197,25 @@ class AgentManager:
                 "Ensuring agent connection on demand",
                 chat_id=chat_id,
                 cwd=conn.workspace_cwd,
+                spawn_id=conn.spawn_id,
             )
             try:
-                await conn.agent_process.start_once(
-                    conn.acp_client, self._initialize_timeout_seconds
+                _, extra_context = await conn.agent_process.start_once(
+                    conn.acp_client,
+                    self._initialize_timeout_seconds,
+                    chat_id=chat_id,
+                    workspace_name=workspace_name,
+                    spawn_id=conn.spawn_id,
                 )
+                conn.extra_log_context = dict(extra_context)
+                if not conn.spawn_id:
+                    conn.spawn_id = str(extra_context.get("spawn_id") or "") or None
                 info_event(
                     logger,
                     "agent_connect_ok",
                     "Agent connection established",
                     chat_id=chat_id,
+                    spawn_id=conn.spawn_id,
                 )
             except Exception as e:
                 warning_event(
@@ -195,6 +223,7 @@ class AgentManager:
                     "agent_connect_fail",
                     "Agent connection failed",
                     chat_id=chat_id,
+                    spawn_id=conn.spawn_id,
                     err=str(e),
                 )
                 raise
@@ -217,6 +246,8 @@ class AgentManager:
                 conn.turn_accumulator.clear()
                 conn.turn_update_count = 0
                 conn.active_prompt = False
+                conn.spawn_id = None
+                conn.extra_log_context.clear()
                 info_event(logger, "agent_disconnect", "Agent disconnected", chat_id=chat_id)
         else:
             # Disconnect all chats
@@ -229,6 +260,8 @@ class AgentManager:
                 conn.turn_accumulator.clear()
                 conn.turn_update_count = 0
                 conn.active_prompt = False
+                conn.spawn_id = None
+                conn.extra_log_context.clear()
             self._connections.clear()
             info_event(logger, "agent_disconnect_all", "All agent connections closed")
 

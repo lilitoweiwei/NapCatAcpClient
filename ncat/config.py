@@ -30,6 +30,8 @@ class AgentConfig:
     default_workspace: str = "default"
     # Extra environment variables for the agent process (merged with system env)
     env: dict[str, str] = field(default_factory=dict)
+    # Optional env var name used to pass a JSON object of extra log context
+    log_extra_context_env_var: str | None = None
     # Timeout in seconds for ACP initialize; on timeout, retry after retry_interval_seconds
     initialize_timeout_seconds: float = 30.0
     # Fixed interval in seconds between connection attempts (no backoff)

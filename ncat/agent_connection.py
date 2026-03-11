@@ -6,6 +6,7 @@ ACP client, the long-lived ACP session, and turn-level accumulation state.
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ncat.acp_client import NcatAcpClient
 from ncat.agent_process import AgentProcess
@@ -35,6 +36,8 @@ class AgentConnection:
     turn_update_count: int = 0
     active_prompt: bool = False
     workspace_cwd: str | None = None
+    spawn_id: str | None = None
+    extra_log_context: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_running(self) -> bool:

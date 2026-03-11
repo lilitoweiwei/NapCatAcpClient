@@ -16,6 +16,10 @@ args = []
 workspace_root = "/workspace"
 # Default workspace name used when /new is sent without an argument.
 default_workspace = "default"
+# Optional env var name used to pass a JSON object with extra log context
+# to the agent wrapper. ncat only emits the JSON object and does not define
+# how the wrapper stores it.
+log_extra_context_env_var = "SUZU_WRAPPER_EXTRA_LOG"
 # Extra environment variables passed to the agent process.
 # These are merged with the system environment (and override on conflict).
 # Useful for API keys, proxy settings, etc.

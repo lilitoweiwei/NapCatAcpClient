@@ -36,6 +36,7 @@ uv run python main.py /path/to/your.toml
 - `args`: 传递给 Agent 的启动参数（例如 `["--experimental-acp"]`）。
 - `workspace_root`: 工作区根目录（默认 `"/workspace"`）。
 - `default_workspace`: 默认工作区名；当用户发送 `/new` 而不带参数时，会使用 `workspace_root/default_workspace`。
+- `log_extra_context_env_var`: 可选环境变量名。若配置，ncat 会在每次拉起 Agent 前，把一个 JSON object 写入该环境变量，供外部 wrapper 记录额外日志上下文。
 
 打开 `[ux]` 块时，另一个常用配置是：
 - `max_reply_text_length`: 单条发往 QQ 的文本长度上限，默认 `5000`。超过后，ncat 会在发送前自动拆成多条消息；设置为 `0` 可关闭预拆分。
@@ -43,6 +44,21 @@ uv run python main.py /path/to/your.toml
 其他诸如日志目录、UX 体验优化、网络端口等丰富配置，请直接阅读 `config.example.toml` 中的注释，默认配置即可运行。
 
 **持久化数据**：ncat 运行过程中产生的持久化数据主要有日志文件和工作区目录。它们均可在 `config.toml` 中指定（`[logging] dir` 和 `[agent] workspace_root`）。单独运行时，日志默认落在 `data/logs/`。当前 `ncat.log` 已采用一行一个 JSON 对象的结构化日志格式，适合后续按字段查询。
+
+## Agent 启动时的对外输出约定
+
+如果配置了 `[agent].log_extra_context_env_var`，ncat 会在启动 agent 子进程前，通过该环境变量传递一个 JSON object。ncat 自己只保证“传递 JSON object”，不规定 wrapper 必须使用哪个固定环境变量名，也不规定 wrapper 如何落盘。
+
+当前 ncat 计划放入该 JSON object 的字段包括：
+
+- `workspace`
+- `workspace_name`
+- `chat_id`
+- `spawn_id`
+- `agent_cwd`
+- `agent_command`
+
+这些字段都属于 ncat 已知、且可能对外部模块日志有帮助的上下文。外部模块可以选择全部接收，也可以只做 best-effort 记录。
 
 **MCP servers**：如果目标 ACP agent 支持在 `session/new` 时接收 MCP server 配置，可以在 `[[mcp]]` 中声明额外的 MCP servers。当前 `ncat` 仅负责把这些配置透传给 ACP session，不负责某个具体 MCP server 的实现、文档或部署说明。
 

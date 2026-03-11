@@ -5,7 +5,7 @@ import contextlib
 
 import pytest
 
-from ncat.models import ParsedMessage
+from ncat.models import ContentPart, ParsedMessage, VisibleTurnEvent
 from ncat.prompt_runner import PromptRunner
 from tests.mock_agent import MockAgentManager
 
@@ -287,3 +287,36 @@ async def test_long_thinking_notification_fires_when_very_slow() -> None:
     assert any("正在思考" in t for t in texts)
     assert any("/stop" in t for t in texts)
     assert "Mock AI response" in texts
+
+
+async def test_visible_event_flushes_buffered_text_before_final_reply() -> None:
+    """Visible turn events should flush buffered text before the final reply."""
+    agent = MockAgentManager()
+    agent.stream_steps = [
+        (
+            0,
+            [ContentPart(type="text", text="你好，我先看一下。")],
+            VisibleTurnEvent(key="thinking", status_text="<AI 正在思考中>"),
+        ),
+        (
+            0,
+            [],
+            VisibleTurnEvent(key="tool:glob:in_progress", status_text="<AI 正在调用：glob>"),
+        ),
+    ]
+    agent.response_parts = [ContentPart(type="text", text="最终结论")]
+    replies = ReplyQueue()
+    runner = PromptRunner(
+        agent_manager=agent,
+        reply_fn=replies,
+        thinking_notify_seconds=0,
+        thinking_long_notify_seconds=0,
+    )
+
+    await runner.process(_parsed_private("private:111", 111, "Alice", "hello"), event={})
+
+    assert replies.texts == [
+        "你好，我先看一下。\n<AI 正在思考中>",
+        "<AI 正在调用：glob>",
+        "最终结论",
+    ]

@@ -10,7 +10,7 @@ from typing import Any
 
 from ncat.acp_client import NcatAcpClient
 from ncat.agent_process import AgentProcess
-from ncat.models import ContentPart
+from ncat.models import ContentPart, VisibleTurnEvent
 
 
 @dataclass
@@ -33,6 +33,8 @@ class AgentConnection:
     active_session_id: str | None = None
     active_turn_session_id: str | None = None
     turn_accumulator: list[ContentPart] = field(default_factory=list)
+    visible_turn_events: list[VisibleTurnEvent] = field(default_factory=list)
+    visible_turn_event_keys: set[str] = field(default_factory=set)
     turn_update_count: int = 0
     active_prompt: bool = False
     workspace_cwd: str | None = None

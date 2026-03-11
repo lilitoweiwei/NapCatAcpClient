@@ -161,6 +161,7 @@ graph TD
 - 某个 chat 的第一条普通消息到来时，才会懒启动该 chat 的 Agent 子进程，建立 ACP 连接并完成 `initialize`。
 - 连接建立后，ncat 为该 chat 创建一个 ACP session；只要用户没有发送 `/new`，后续普通消息都会持续复用这个 session。
 - 某些 Agent 会在 `session/prompt` 返回后继续送达少量尾部 `session/update` 分片；ncat 会在转发到 QQ 前短暂等待这些尾部流式分片，避免长回复被截断。
+- 当前前台会话会根据部分 ACP 事件边界提前向 QQ 发送中间状态，而不是始终等到整轮结束后再一次性回复。当前会展示的状态主要包括思考中、规划中、工具调用中、以及权限请求已自动允许等提示。
 - `/stop` 只会对当前 prompt turn 发送 `session/cancel`，不会结束会话，也不会重启 Agent 进程。
 - `/new` 会丢弃当前 session、本地清空上下文，并停止该 chat 对应的 Agent 子进程；下一条普通消息才会重新启动新的 Agent 并创建新的 session。
 - 如果 Agent 在一次对话中发生异常，ncat 会关闭当前 session；下一次普通消息会自动创建一个新的 session。

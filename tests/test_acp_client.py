@@ -2,14 +2,19 @@
 
 import pytest
 from acp.schema import (
+    AgentPlanUpdate,
+    AgentThoughtChunk,
     AllowedOutcome,
     DeniedOutcome,
     PermissionOption,
     RequestPermissionResponse,
+    TextContentBlock,
+    ToolCallStart,
     ToolCallUpdate,
 )
 
 from ncat.acp_client import NcatAcpClient
+from ncat.models import VisibleTurnEvent
 
 pytestmark = pytest.mark.asyncio
 
@@ -26,7 +31,16 @@ def _tool_call(
 @pytest.fixture
 def client():
     """NcatAcpClient with a minimal agent manager (request_permission does not use it)."""
-    return NcatAcpClient(agent_manager=object(), chat_id="test:123")
+    return NcatAcpClient(agent_manager=RecordingAgentManager(), chat_id="test:123")
+
+
+class RecordingAgentManager:
+    def __init__(self) -> None:
+        self.visible_events: list[tuple[str, str, VisibleTurnEvent]] = []
+
+    def record_visible_event(self, chat_id: str, session_id: str, event: VisibleTurnEvent) -> bool:
+        self.visible_events.append((chat_id, session_id, event))
+        return True
 
 
 async def test_request_permission_prefers_allow_always(client: NcatAcpClient) -> None:
@@ -85,3 +99,62 @@ async def test_request_permission_empty_options_denied(client: NcatAcpClient) ->
     )
     assert isinstance(resp.outcome, DeniedOutcome)
     assert resp.outcome.outcome == "cancelled"
+
+
+async def test_session_update_records_visible_thinking_event() -> None:
+    manager = RecordingAgentManager()
+    client = NcatAcpClient(agent_manager=manager, chat_id="test:123")
+
+    await client.session_update(
+        session_id="s1",
+        update=AgentThoughtChunk(
+            sessionUpdate="agent_thought_chunk",
+            content=TextContentBlock(type="text", text="thinking..."),
+        ),
+    )
+
+    assert manager.visible_events[0][2].status_text == "<AI 正在思考中>"
+
+
+async def test_session_update_records_visible_tool_event() -> None:
+    manager = RecordingAgentManager()
+    client = NcatAcpClient(agent_manager=manager, chat_id="test:123")
+
+    await client.session_update(
+        session_id="s1",
+        update=ToolCallStart(
+            sessionUpdate="tool_call",
+            toolCallId="tc1",
+            title="Read file",
+            kind="read",
+            status="pending",
+        ),
+    )
+
+    assert manager.visible_events[0][2].status_text == "<AI 正在调用：Read file>"
+
+
+async def test_session_update_records_visible_plan_event() -> None:
+    manager = RecordingAgentManager()
+    client = NcatAcpClient(agent_manager=manager, chat_id="test:123")
+
+    await client.session_update(
+        session_id="s1",
+        update=AgentPlanUpdate(sessionUpdate="plan", entries=[]),
+    )
+
+    assert manager.visible_events[0][2].status_text == "<AI 正在规划任务>"
+
+
+async def test_request_permission_records_visible_status() -> None:
+    manager = RecordingAgentManager()
+    client = NcatAcpClient(agent_manager=manager, chat_id="test:123")
+    options = [PermissionOption(kind="allow_once", name="Allow once", optionId="o1")]
+
+    await client.request_permission(
+        options=options,
+        session_id="s1",
+        tool_call=ToolCallUpdate(toolCallId="tc1", kind="edit", title="Edit file", rawInput=None),
+    )
+
+    assert manager.visible_events[0][2].status_text == "<AI 请求权限：Edit file（已自动允许）>"

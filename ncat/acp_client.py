@@ -40,12 +40,31 @@ from acp.schema import (
 )
 
 from ncat.log import debug_event
-from ncat.models import ContentPart
+from ncat.models import ContentPart, VisibleTurnEvent
 
 if TYPE_CHECKING:
     from ncat.agent_manager import AgentManager
 
 logger = logging.getLogger("ncat.acp_client")
+
+
+def _format_tool_label(update: ToolCallStart | ToolCallProgress | ToolCallUpdate) -> str:
+    title = (update.title or "").strip() if getattr(update, "title", None) else ""
+    if title:
+        return title
+    kind = update.kind or "other"
+    return kind
+
+
+def _record_visible_event(
+    agent_manager: Any,
+    chat_id: str,
+    session_id: str,
+    event: VisibleTurnEvent,
+) -> None:
+    record = getattr(agent_manager, "record_visible_event", None)
+    if callable(record):
+        record(chat_id, session_id, event)
 
 
 class NcatAcpClient(Client):
@@ -105,6 +124,22 @@ class NcatAcpClient(Client):
                     ),
                 )
         elif isinstance(update, (ToolCallStart, ToolCallProgress)):
+            status = update.status or "pending"
+            if status in {"pending", "in_progress", "failed"}:
+                tool_label = _format_tool_label(update)
+                if status == "failed":
+                    status_text = f"<AI 调用失败：{tool_label}>"
+                else:
+                    status_text = f"<AI 正在调用：{tool_label}>"
+                _record_visible_event(
+                    self._agent_manager,
+                    self._chat_id,
+                    session_id,
+                    VisibleTurnEvent(
+                        key=f"tool:{update.tool_call_id}:{status}",
+                        status_text=status_text,
+                    ),
+                )
             debug_event(
                 logger,
                 "tool_call_update",
@@ -114,12 +149,31 @@ class NcatAcpClient(Client):
                 update_type=type(update).__name__,
             )
         elif isinstance(update, AgentPlanUpdate):
+            _record_visible_event(
+                self._agent_manager,
+                self._chat_id,
+                session_id,
+                VisibleTurnEvent(
+                    key=f"plan:{len(update.entries)}",
+                    status_text="<AI 正在规划任务>",
+                ),
+            )
             debug_event(
                 logger,
                 "agent_plan_update",
                 "Agent plan update received",
                 session_id=session_id,
                 chat_id=self._chat_id,
+            )
+        elif isinstance(update, AgentThoughtChunk):
+            _record_visible_event(
+                self._agent_manager,
+                self._chat_id,
+                session_id,
+                VisibleTurnEvent(
+                    key="thinking",
+                    status_text="<AI 正在思考中>",
+                ),
             )
 
     async def request_permission(
@@ -147,6 +201,16 @@ class NcatAcpClient(Client):
                     break
         if selected is None:
             selected = options[0]
+        tool_label = _format_tool_label(tool_call)
+        _record_visible_event(
+            self._agent_manager,
+            self._chat_id,
+            session_id,
+            VisibleTurnEvent(
+                key=f"permission:{tool_call.tool_call_id}",
+                status_text=f"<AI 请求权限：{tool_label}（已自动允许）>",
+            ),
+        )
         return RequestPermissionResponse(
             outcome=AllowedOutcome(outcome="selected", option_id=selected.option_id)
         )

@@ -11,7 +11,7 @@ by `ncat.acp_client.NcatAcpClient`.
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 
 from ncat.acp_client import NcatAcpClient
@@ -19,7 +19,7 @@ from ncat.agent_connection import AgentConnection
 from ncat.agent_process import AgentProcess, PromptBlock
 from ncat.config import McpServerConfig
 from ncat.log import info_event, warning_event
-from ncat.models import ContentPart
+from ncat.models import ContentPart, VisibleTurnEvent
 
 logger = logging.getLogger("ncat.agent_manager")
 
@@ -80,6 +80,10 @@ class AgentManager:
         # One-time cwd for the next session creation only.
         self._next_session_cwd: dict[str, str] = {}
 
+        # PromptRunner callbacks invoked when a user-visible event boundary arrives.
+        self._visible_event_notifiers: dict[str, asyncio.Task[None] | None] = {}
+        self._visible_event_callbacks: dict[str, Callable[[], Awaitable[None]]] = {}
+
         # Lock for creating new connections (to avoid race conditions)
         self._connection_locks: dict[str, asyncio.Lock] = {}
 
@@ -90,6 +94,17 @@ class AgentManager:
         if chat_id not in self._connection_locks:
             self._connection_locks[chat_id] = asyncio.Lock()
         return self._connection_locks[chat_id]
+
+    def set_visible_event_notifier(self, chat_id: str, notifier) -> None:
+        """Register or clear the callback fired for visible turn events."""
+        if notifier is None:
+            self._visible_event_callbacks.pop(chat_id, None)
+            task = self._visible_event_notifiers.pop(chat_id, None)
+            if task is not None:
+                task.cancel()
+            return
+
+        self._visible_event_callbacks[chat_id] = notifier
 
     def _resolve_workspace_path(self, workspace: str | None) -> str:
         """Resolve a workspace name to an absolute path under workspace_root."""
@@ -177,6 +192,8 @@ class AgentManager:
             conn.active_session_id = None
             conn.active_turn_session_id = None
             conn.turn_accumulator.clear()
+            conn.visible_turn_events.clear()
+            conn.visible_turn_event_keys.clear()
             conn.turn_update_count = 0
             conn.active_prompt = False
             conn.workspace_cwd = self._get_connection_cwd(chat_id)
@@ -244,6 +261,8 @@ class AgentManager:
                 conn.active_session_id = None
                 conn.active_turn_session_id = None
                 conn.turn_accumulator.clear()
+                conn.visible_turn_events.clear()
+                conn.visible_turn_event_keys.clear()
                 conn.turn_update_count = 0
                 conn.active_prompt = False
                 conn.spawn_id = None
@@ -258,6 +277,8 @@ class AgentManager:
                 conn.active_session_id = None
                 conn.active_turn_session_id = None
                 conn.turn_accumulator.clear()
+                conn.visible_turn_events.clear()
+                conn.visible_turn_event_keys.clear()
                 conn.turn_update_count = 0
                 conn.active_prompt = False
                 conn.spawn_id = None
@@ -377,6 +398,8 @@ class AgentManager:
         conn.active_session_id = session_id
         conn.active_turn_session_id = None
         conn.turn_accumulator.clear()
+        conn.visible_turn_events.clear()
+        conn.visible_turn_event_keys.clear()
         conn.turn_update_count = 0
         info_event(
             logger,
@@ -400,6 +423,8 @@ class AgentManager:
             conn.active_session_id = None
             conn.active_turn_session_id = None
             conn.turn_accumulator.clear()
+            conn.visible_turn_events.clear()
+            conn.visible_turn_event_keys.clear()
             conn.turn_update_count = 0
             conn.active_prompt = False
             info_event(logger, "session_close", "Closed session", chat_id=chat_id)
@@ -428,6 +453,88 @@ class AgentManager:
         ):
             conn.turn_accumulator.append(part)
             conn.turn_update_count += 1
+
+    def record_visible_event(
+        self,
+        chat_id: str,
+        session_id: str,
+        event: VisibleTurnEvent,
+    ) -> bool:
+        """Record a deduplicated user-visible turn event for the active prompt."""
+        conn = self._connections.get(chat_id)
+        if (
+            conn is None
+            or not conn.active_prompt
+            or conn.active_turn_session_id != session_id
+            or event.key in conn.visible_turn_event_keys
+        ):
+            return False
+
+        event.part_count = len(conn.turn_accumulator)
+        conn.visible_turn_events.append(event)
+        conn.visible_turn_event_keys.add(event.key)
+        conn.turn_update_count += 1
+        self._notify_visible_event(chat_id)
+        return True
+
+    def _notify_visible_event(self, chat_id: str) -> None:
+        notifier = self._visible_event_callbacks.get(chat_id)
+        if notifier is None:
+            return
+
+        task = self._visible_event_notifiers.get(chat_id)
+        if task is not None and not task.done():
+            return
+
+        async def _run_notifier() -> None:
+            try:
+                await notifier()
+            finally:
+                current = self._visible_event_notifiers.get(chat_id)
+                if current is asyncio.current_task():
+                    self._visible_event_notifiers.pop(chat_id, None)
+
+        self._visible_event_notifiers[chat_id] = asyncio.create_task(_run_notifier())
+
+    def pop_visible_events(self, chat_id: str) -> list[VisibleTurnEvent]:
+        """Return and clear pending visible turn events for the active chat."""
+        conn = self._connections.get(chat_id)
+        if conn is None or not conn.visible_turn_events:
+            return []
+
+        events = list(conn.visible_turn_events)
+        conn.visible_turn_events.clear()
+        return events
+
+    def drain_visible_event_flushes(
+        self,
+        chat_id: str,
+        sent_part_count: int,
+    ) -> tuple[list[tuple[list[ContentPart], VisibleTurnEvent]], int]:
+        """Drain pending visible events together with text accumulated before each one."""
+        conn = self._connections.get(chat_id)
+        if conn is None or not conn.visible_turn_events:
+            return [], sent_part_count
+
+        flushes: list[tuple[list[ContentPart], VisibleTurnEvent]] = []
+        next_sent_part_count = sent_part_count
+        for visible_event in conn.visible_turn_events:
+            parts = list(conn.turn_accumulator[next_sent_part_count : visible_event.part_count])
+            flushes.append((parts, visible_event))
+            next_sent_part_count = visible_event.part_count
+
+        conn.visible_turn_events.clear()
+        return flushes, next_sent_part_count
+
+    def clear_completed_turn_state(self, chat_id: str) -> None:
+        """Clear accumulated turn state after PromptRunner finishes sending outputs."""
+        conn = self._connections.get(chat_id)
+        if conn is None:
+            return
+
+        conn.turn_accumulator.clear()
+        conn.visible_turn_events.clear()
+        conn.visible_turn_event_keys.clear()
 
     async def wait_for_turn_settle(
         self,
@@ -487,6 +594,8 @@ class AgentManager:
 
         # Initialize turn-level state
         conn.turn_accumulator.clear()
+        conn.visible_turn_events.clear()
+        conn.visible_turn_event_keys.clear()
         conn.turn_update_count = 0
         conn.active_turn_session_id = session_id
         conn.active_prompt = True
@@ -527,7 +636,6 @@ class AgentManager:
             raise AgentErrorWithPartialContent(e, partial_parts) from e
 
         finally:
-            conn.turn_accumulator.clear()
             conn.turn_update_count = 0
             conn.active_turn_session_id = None
             conn.active_prompt = False

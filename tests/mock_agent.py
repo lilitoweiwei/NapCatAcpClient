@@ -6,13 +6,14 @@ spawning a real ACP agent subprocess.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ncat.agent_manager import (
     MSG_AGENT_NOT_CONNECTED,
     AgentErrorWithPartialContent,
 )
-from ncat.models import ContentPart
+from ncat.models import ContentPart, VisibleTurnEvent
 
 
 class MockAgentManager:
@@ -58,6 +59,12 @@ class MockAgentManager:
         self.session_ids_by_chat: dict[str, str] = {}
         self.new_session_calls: list[tuple[str, str | None]] = []
         self.prompt_session_ids: list[tuple[str, str]] = []
+        self._visible_event_notifiers: dict[str, Callable[[], Awaitable[None]]] = {}
+        self._pending_visible_flushes: dict[
+            str,
+            list[tuple[list[ContentPart], VisibleTurnEvent]],
+        ] = {}
+        self.stream_steps: list[tuple[float, list[ContentPart], VisibleTurnEvent]] = []
 
     def is_running(self, chat_id: str) -> bool:
         return self._is_running
@@ -114,6 +121,36 @@ class MockAgentManager:
     async def close_all_sessions(self) -> None:
         self.all_sessions_closed = True
 
+    def set_visible_event_notifier(
+        self,
+        chat_id: str,
+        notifier: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        if notifier is None:
+            self._visible_event_notifiers.pop(chat_id, None)
+            return
+        self._visible_event_notifiers[chat_id] = notifier
+
+    def drain_visible_event_flushes(
+        self,
+        chat_id: str,
+        sent_part_count: int,
+    ) -> tuple[list[tuple[list[ContentPart], VisibleTurnEvent]], int]:
+        flushes = self._pending_visible_flushes.pop(chat_id, [])
+        next_sent = sent_part_count + sum(len(parts) for parts, _ in flushes)
+        return flushes, next_sent
+
+    def clear_completed_turn_state(self, chat_id: str) -> None:
+        self._pending_visible_flushes.pop(chat_id, None)
+
+    def queue_visible_flush(
+        self,
+        chat_id: str,
+        parts: list[ContentPart],
+        visible_event: VisibleTurnEvent,
+    ) -> None:
+        self._pending_visible_flushes.setdefault(chat_id, []).append((parts, visible_event))
+
     def accumulate_text(self, session_id: str, text: str) -> None:
         pass
 
@@ -141,11 +178,20 @@ class MockAgentManager:
         if self.raise_error_with_parts is not None:
             cause, parts = self.raise_error_with_parts
             raise AgentErrorWithPartialContent(cause, parts)
+        streamed_parts: list[ContentPart] = []
+        for delay, parts, visible_event in self.stream_steps:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            streamed_parts.extend(parts)
+            self.queue_visible_flush(chat_id, parts, visible_event)
+            notifier = self._visible_event_notifiers.get(chat_id)
+            if notifier is not None:
+                await notifier()
         if self.delay > 0:
             await asyncio.sleep(self.delay)
         if self.response_parts is not None:
-            return self.response_parts
-        return [ContentPart(type="text", text=self.response_text)]
+            return [*streamed_parts, *self.response_parts]
+        return [*streamed_parts, ContentPart(type="text", text=self.response_text)]
 
     async def cancel(self, chat_id: str) -> bool:
         self.cancelled.add(chat_id)

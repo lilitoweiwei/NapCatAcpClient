@@ -26,6 +26,18 @@ class ContentPart:
 
 
 @dataclass
+class VisibleTurnEvent:
+    """User-visible status event emitted at an ACP turn boundary."""
+
+    # Stable dedupe key within the active turn
+    key: str
+    # User-visible status line to append below buffered content
+    status_text: str
+    # Count of content parts accumulated before this event was observed
+    part_count: int = 0
+
+
+@dataclass
 class ParsedMessage:
     """Result of parsing an incoming OneBot message event."""
 

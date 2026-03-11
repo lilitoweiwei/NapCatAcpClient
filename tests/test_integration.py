@@ -8,7 +8,7 @@ import websockets
 from acp.schema import ImageContentBlock, TextContentBlock
 
 import ncat.prompt_runner as prompt_runner_module
-from ncat.models import ContentPart
+from ncat.models import ContentPart, VisibleTurnEvent
 from ncat.napcat_server import NcatNapCatServer
 from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
@@ -59,6 +59,42 @@ async def test_full_private_conversation(full_stack) -> None:
     assert chat_id == "private:111"
     assert "[Private chat, user Alice(111)]" in prompt
     assert "hello" in prompt
+
+
+async def test_event_boundary_updates_are_sent_before_final_reply(full_stack) -> None:
+    """Integration test: ACP-visible events flush intermediate QQ messages."""
+    _, mock, mock_agent = full_stack
+    mock_agent.stream_steps = [
+        (
+            0,
+            [ContentPart(type="text", text="你好，我先看一下。")],
+            VisibleTurnEvent(key="thinking", status_text="<AI 正在思考中>"),
+        ),
+        (
+            0,
+            [],
+            VisibleTurnEvent(key="tool:glob:in_progress", status_text="<AI 正在调用：glob>"),
+        ),
+    ]
+    mock_agent.response_parts = [ContentPart(type="text", text="Integration AI response")]
+
+    await mock.send_private_message(111, "Alice", "hello")
+
+    first_call = await mock.recv_api_call(timeout=5.0)
+    second_call = await mock.recv_api_call(timeout=5.0)
+    third_call = await mock.recv_api_call(timeout=5.0)
+    fourth_call = await mock.recv_api_call(timeout=0.2)
+
+    assert first_call is not None
+    assert second_call is not None
+    assert third_call is not None
+    assert fourth_call is None
+    assert (
+        first_call["params"]["message"][0]["data"]["text"]
+        == "你好，我先看一下。\n<AI 正在思考中>"
+    )
+    assert second_call["params"]["message"][0]["data"]["text"] == "<AI 正在调用：glob>"
+    assert third_call["params"]["message"][0]["data"]["text"] == "Integration AI response"
 
 
 async def test_private_image_forwarded_to_agent_when_supported(full_stack, monkeypatch) -> None:

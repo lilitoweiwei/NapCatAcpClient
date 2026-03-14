@@ -5,7 +5,8 @@ import contextlib
 
 import pytest
 
-from ncat.models import ContentPart, ParsedMessage, VisibleTurnEvent
+import ncat.prompt_runner as prompt_runner_module
+from ncat.models import ContentPart, ImageAttachment, ParsedMessage, VisibleTurnEvent
 from ncat.prompt_runner import PromptRunner
 from tests.mock_agent import MockAgentManager
 
@@ -320,3 +321,44 @@ async def test_visible_event_flushes_buffered_text_before_final_reply() -> None:
         "<AI 正在调用：glob>",
         "最终结论",
     ]
+
+
+async def test_large_image_is_saved_as_file_in_prompt(tmp_path) -> None:
+    agent = MockAgentManager()
+    agent._supports_image = True
+    agent.workspace_cwds["private:111"] = str(tmp_path / "default")
+    replies = ReplyQueue()
+    runner = PromptRunner(
+        agent_manager=agent,
+        reply_fn=replies,
+        thinking_notify_seconds=0,
+        thinking_long_notify_seconds=0,
+        large_image_threshold_mb=5,
+    )
+
+    class _DownloadedImage:
+        def __init__(self) -> None:
+            self.url = "http://example.com/huge.png"
+            self.data = b"x" * (6 * 1024 * 1024)
+            self.mime_type = "image/png"
+            self.suggested_name = "huge.png"
+
+    async def _fake_download_image(url: str, timeout_seconds: float):
+        assert url == "http://example.com/huge.png"
+        assert timeout_seconds > 0
+        return _DownloadedImage()
+
+    original = prompt_runner_module.download_image
+    prompt_runner_module.download_image = _fake_download_image
+    try:
+        parsed = _parsed_private("private:111", 111, "Alice", "please check")
+        parsed.images = [ImageAttachment(url="http://example.com/huge.png")]
+        await runner.process(parsed, event={"user_id": 111})
+    finally:
+        prompt_runner_module.download_image = original
+
+    assert len(agent.calls) == 1
+    _, prompt = agent.calls[0]
+    assert "[图片已按文件附件处理]" in prompt
+    assert "This image exceeded the inline-image threshold" in prompt
+    assert "/.qqfiles/huge.png" in prompt

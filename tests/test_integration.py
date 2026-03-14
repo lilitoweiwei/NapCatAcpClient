@@ -186,6 +186,59 @@ async def test_private_image_download_failed_falls_back_to_url(full_stack, monke
     assert not any(isinstance(b, ImageContentBlock) for b in blocks)
 
 
+async def test_private_large_image_is_saved_as_file(full_stack, monkeypatch, tmp_path: Path) -> None:
+    """Large private images should be saved to the workspace and not sent inline."""
+    _, mock, mock_agent = full_stack
+    mock_agent._supports_image = True
+    mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
+
+    class _DownloadedImage:
+        def __init__(self) -> None:
+            self.url = "http://example.com/huge.png"
+            self.data = b"x" * (6 * 1024 * 1024)
+            self.mime_type = "image/png"
+            self.suggested_name = "huge.png"
+
+    async def _fake_download_image(url: str, timeout_seconds: float):
+        assert url == "http://example.com/huge.png"
+        assert timeout_seconds > 0
+        return _DownloadedImage()
+
+    monkeypatch.setattr(prompt_runner_module, "download_image", _fake_download_image)
+
+    await mock._send_event(
+        {
+            "self_id": mock.BOT_ID,
+            "user_id": 111,
+            "time": 0,
+            "message_id": mock._next_message_id(),
+            "message_type": "private",
+            "sub_type": "friend",
+            "sender": {"user_id": 111, "nickname": "Alice", "card": ""},
+            "message": [
+                {"type": "text", "data": {"text": "see"}},
+                {"type": "image", "data": {"url": "http://example.com/huge.png"}},
+            ],
+            "message_format": "array",
+            "raw_message": "see[CQ:image]",
+            "font": 14,
+            "post_type": "message",
+        }
+    )
+
+    api_call = await mock.recv_api_call(timeout=5.0)
+    assert api_call is not None
+    assert api_call["action"] == "send_private_msg"
+
+    assert mock_agent.calls_blocks
+    _, blocks = mock_agent.calls_blocks[0]
+    assert isinstance(blocks[0], TextContentBlock)
+    assert "[图片已按文件附件处理]" in blocks[0].text
+    assert "This image exceeded the inline-image threshold" in blocks[0].text
+    assert "/.qqfiles/huge.png" in blocks[0].text
+    assert not any(isinstance(b, ImageContentBlock) for b in blocks)
+
+
 async def test_agent_image_reply_sends_image_segment(full_stack) -> None:
     """If agent returns an image ContentPart, ncat should send an image segment to QQ."""
     _, mock, mock_agent = full_stack

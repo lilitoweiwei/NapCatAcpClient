@@ -75,6 +75,7 @@ uv run python main.py /path/to/your.toml
 - 私聊里的图片-only消息也会先缓冲，不会立刻触发 Agent。
 - 只有当用户后续发送第一条带文本的消息时，ncat 才会把累计的文件和图片一起并入这轮 prompt。
 - 文件会通过系统提示文本附加给 Agent，例如 `[SYSTEM: The user attached a file. It has been saved at /workspace/default/.qqfiles/foo.pdf]`。
+- 若 Agent 支持图片，小图会继续以内联 ACP 图片块直传；超过 `ux.large_image_threshold_mb` 的大图会先保存到 `.qqfiles/`，并用更显式的系统提示告知 Agent：该图片因超过直传阈值而按文件附件处理。
 - `/new`、NapCat 断开和 pending TTL 过期都会清空尚未消费的附件缓冲。
 
 ## 指令系统

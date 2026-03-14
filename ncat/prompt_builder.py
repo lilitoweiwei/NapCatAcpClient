@@ -11,7 +11,7 @@ from acp.schema import ImageContentBlock, TextContentBlock
 
 from ncat.file_ingress import file_hint_text
 from ncat.log import warning_event
-from ncat.models import ParsedMessage
+from ncat.models import ParsedMessage, PromptImageAttachment
 
 logger = logging.getLogger("ncat.prompt_builder")
 
@@ -86,16 +86,16 @@ def _replace_image_placeholders(text: str, replacements: list[str]) -> str:
 
 def build_prompt_blocks(
     parsed: ParsedMessage,
-    downloaded_images: list[tuple[str, str] | None],
+    prompt_images: list[PromptImageAttachment],
     agent_supports_image: bool,
 ) -> list[TextContentBlock | ImageContentBlock]:
     """Build ACP prompt content blocks (text + optional images)."""
     # Decide how to represent each image in the text for agent-side fallback.
     replacements: list[str] = []
     for i, att in enumerate(parsed.images):
-        downloaded = downloaded_images[i] if i < len(downloaded_images) else None
-        if agent_supports_image and downloaded is not None:
-            replacements.append("[图片]")
+        prompt_image = prompt_images[i] if i < len(prompt_images) else None
+        if prompt_image is not None:
+            replacements.append(prompt_image.replacement_text)
             continue
 
         url = att.url.strip()
@@ -121,10 +121,9 @@ def build_prompt_blocks(
 
     blocks: list[TextContentBlock | ImageContentBlock] = [text_block(prompt_text)]
     if agent_supports_image:
-        for downloaded in downloaded_images:
-            if downloaded is None:
+        for prompt_image in prompt_images:
+            if not prompt_image.inline_image_base64:
                 continue
-            data_b64, mime_type = downloaded
-            blocks.append(image_block(data_b64, mime_type))
+            blocks.append(image_block(prompt_image.inline_image_base64, prompt_image.inline_image_mime))
 
     return blocks

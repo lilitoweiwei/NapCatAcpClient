@@ -58,6 +58,7 @@ class MessageDispatcher:
         file_download_timeout: float = 30.0,
         pending_ttl_seconds: float = 1800.0,
         max_file_size_mb: int | None = None,
+        large_image_threshold_mb: int = 5,
         get_file_fn: Callable[[str], Awaitable[dict | None]] | None = None,
         bsp_client: BspClient | None = None,
     ) -> None:
@@ -87,6 +88,8 @@ class MessageDispatcher:
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
             image_download_timeout=image_download_timeout,
+            file_inbox_dirname=file_inbox_dirname,
+            large_image_threshold_mb=large_image_threshold_mb,
         )
 
         # Configure command registry with dependencies

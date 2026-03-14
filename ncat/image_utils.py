@@ -1,18 +1,16 @@
-"""Image helpers for ncat.
-
-Currently used to download images from NapCat-provided URLs and encode them as
-base64 for ACP `ImageContentBlock`.
-"""
+"""Image helpers for ncat."""
 
 from __future__ import annotations
 
 import base64
 import logging
-import mimetypes
+from pathlib import Path
 
 import httpx
 
+from ncat.file_ingress import guess_mime_type_from_name
 from ncat.log import warning_event
+from ncat.models import DownloadedImage
 
 logger = logging.getLogger("ncat.image_utils")
 
@@ -25,14 +23,22 @@ def _normalize_mime_type(content_type: str | None) -> str | None:
     return mime_type or None
 
 
-def _guess_mime_type_from_url(url: str) -> str | None:
-    """Best-effort MIME type guess based on URL path/extension."""
-    mime_type, _ = mimetypes.guess_type(url)
-    return mime_type
+def _suggest_filename(url: str, mime_type: str) -> str:
+    """Best-effort filename for a downloaded QQ image."""
+    raw_name = Path(url.split("?", 1)[0]).name or "qq-image"
+    if "." in raw_name:
+        return raw_name
+    guessed = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+    }.get(mime_type, "")
+    return f"{raw_name}{guessed}"
 
 
-async def download_image(url: str, timeout_seconds: float) -> tuple[str, str] | None:
-    """Download an image and return (base64_data, mime_type).
+async def download_image(url: str, timeout_seconds: float) -> DownloadedImage | None:
+    """Download an image and return bytes plus metadata.
 
     Returns None on failure. Callers should fall back to sending the URL to the agent.
     """
@@ -44,11 +50,15 @@ async def download_image(url: str, timeout_seconds: float) -> tuple[str, str] | 
             # Prefer the server's Content-Type; fall back to a URL-based guess.
             mime_type = (
                 _normalize_mime_type(resp.headers.get("Content-Type"))
-                or _guess_mime_type_from_url(url)
+                or guess_mime_type_from_name(url)
                 or "image/png"
             )
-            data_b64 = base64.b64encode(resp.content).decode("ascii")
-            return data_b64, mime_type
+            return DownloadedImage(
+                url=url,
+                data=resp.content,
+                mime_type=mime_type,
+                suggested_name=_suggest_filename(url, mime_type),
+            )
     except (httpx.RequestError, httpx.HTTPStatusError) as e:
         warning_event(
             logger,
@@ -58,3 +68,8 @@ async def download_image(url: str, timeout_seconds: float) -> tuple[str, str] | 
             err=str(e),
         )
         return None
+
+
+def encode_image_base64(image: DownloadedImage) -> tuple[str, str]:
+    """Encode a downloaded image for ACP image blocks."""
+    return base64.b64encode(image.data).decode("ascii"), image.mime_type

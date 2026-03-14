@@ -29,6 +29,27 @@ class SavedFileAttachment:
     saved_path: str
     original_file_id: str
     size: int | None = None
+    kind: str = "file"
+    prompt_note: str = ""
+
+
+@dataclass
+class DownloadedImage:
+    """Downloaded QQ image bytes and metadata before prompt delivery."""
+
+    url: str
+    data: bytes
+    mime_type: str
+    suggested_name: str
+
+
+@dataclass
+class PromptImageAttachment:
+    """Per-image delivery decision for prompt construction."""
+
+    replacement_text: str
+    inline_image_base64: str = ""
+    inline_image_mime: str = ""
 
 
 @dataclass

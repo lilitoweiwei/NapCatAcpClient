@@ -9,7 +9,7 @@ from ncat.converter import (
     content_to_onebot_batches,
     onebot_to_internal,
 )
-from ncat.models import ContentPart, ParsedMessage, SavedFileAttachment
+from ncat.models import ContentPart, ParsedMessage, PromptImageAttachment, SavedFileAttachment
 from ncat.prompt_builder import build_context_header, build_prompt_blocks
 
 BOT_ID = 1234567890
@@ -260,7 +260,13 @@ def test_build_prompt_blocks_image_success() -> None:
 
     blocks = build_prompt_blocks(
         parsed,
-        downloaded_images=[("aGVsbG8=", "image/png")],
+        prompt_images=[
+            PromptImageAttachment(
+                replacement_text="[图片]",
+                inline_image_base64="aGVsbG8=",
+                inline_image_mime="image/png",
+            )
+        ],
         agent_supports_image=True,
     )
     assert isinstance(blocks[0], TextContentBlock)
@@ -285,11 +291,49 @@ def test_build_prompt_blocks_download_failed_falls_back_to_url() -> None:
 
     blocks = build_prompt_blocks(
         parsed,
-        downloaded_images=[None],
+        prompt_images=[PromptImageAttachment(replacement_text="[图片 url=http://example.com/a.png]")],
         agent_supports_image=True,
     )
     assert isinstance(blocks[0], TextContentBlock)
     assert "[图片 url=http://example.com/a.png]" in blocks[0].text
+    assert not any(isinstance(b, ImageContentBlock) for b in blocks)
+
+
+def test_build_prompt_blocks_large_image_saved_as_file() -> None:
+    event = {
+        "self_id": BOT_ID,
+        "user_id": 111,
+        "message_type": "private",
+        "sender": {"user_id": 111, "nickname": "User", "card": ""},
+        "message": [
+            {"type": "text", "data": {"text": "see"}},
+            {"type": "image", "data": {"url": "http://example.com/a.png"}},
+        ],
+        "post_type": "message",
+    }
+    parsed = onebot_to_internal(event, BOT_ID)
+    parsed.pending_files.append(
+        SavedFileAttachment(
+            name="a.png",
+            saved_path="/workspace/default/.qqfiles/a.png",
+            original_file_id="http://example.com/a.png",
+            size=6 * 1024 * 1024,
+            kind="image",
+            prompt_note=(
+                "The user attached an image. This image exceeded the inline-image "
+                "threshold and was handled as a file attachment instead"
+            ),
+        )
+    )
+
+    blocks = build_prompt_blocks(
+        parsed,
+        prompt_images=[PromptImageAttachment(replacement_text="[图片已按文件附件处理]")],
+        agent_supports_image=True,
+    )
+    assert isinstance(blocks[0], TextContentBlock)
+    assert "[图片已按文件附件处理]" in blocks[0].text
+    assert "This image exceeded the inline-image threshold" in blocks[0].text
     assert not any(isinstance(b, ImageContentBlock) for b in blocks)
 
 

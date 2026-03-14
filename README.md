@@ -174,3 +174,4 @@ graph TD
 - `/stop` 只会对当前 prompt turn 发送 `session/cancel`，不会结束会话，也不会重启 Agent 进程。
 - `/new` 会丢弃当前 session、本地清空上下文，并停止该 chat 对应的 Agent 子进程；下一条普通消息才会重新启动新的 Agent 并创建新的 session。
 - 如果 Agent 在一次对话中发生异常，ncat 会关闭当前 session；下一次普通消息会自动创建一个新的 session。
+- 为避免多层 wrapper / ACP / MCP 进程残留，ncat 现在会把每个 chat 的 Agent 启动在独立进程组中；断开连接或 `/new` 时会优先尝试优雅退出，超时后再对整棵进程树执行强制回收。

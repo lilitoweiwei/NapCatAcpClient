@@ -1,6 +1,7 @@
 """Tests for AgentManager session and workspace lifecycle."""
 
 import asyncio
+import signal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -18,13 +19,46 @@ class DummyProcess:
     def __init__(self) -> None:
         self.returncode: int | None = None
         self.pid = 12345
+        self.stdin = DummyStream()
+        self.terminate_calls = 0
+        self.kill_calls = 0
 
     def terminate(self) -> None:
+        self.terminate_calls += 1
         self.returncode = 0
 
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.returncode = -9
+
     async def wait(self) -> int:
-        self.returncode = 0
-        return 0
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
+
+
+class DummyStream:
+    def __init__(self) -> None:
+        self.closed = False
+        self.wait_closed_calls = 0
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        self.wait_closed_calls += 1
+
+
+class HangingProcess(DummyProcess):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_calls = 0
+
+    async def wait(self) -> int:
+        self.wait_calls += 1
+        if self.returncode is None:
+            await asyncio.sleep(60)
+        return await super().wait()
 
 
 class DummyAcpConnection:
@@ -290,6 +324,54 @@ async def test_disconnect_clears_session_and_turn_state(tmp_path: Path) -> None:
     await manager.disconnect("private:1")
 
     assert "private:1" not in manager._connections
+
+
+@pytest.mark.asyncio
+async def test_agent_stop_kills_process_group_after_grace_period(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+    acp_conn = DummyAcpConnection()
+    proc = HangingProcess()
+    conn.agent_process._conn = acp_conn
+    conn.agent_process._process = cast(Any, proc)
+    conn.agent_process._process_group_id = 4321
+
+    killpg_calls: list[tuple[int, signal.Signals]] = []
+
+    def fake_killpg(pgid: int, sig: signal.Signals) -> None:
+        killpg_calls.append((pgid, sig))
+        if sig == signal.SIGKILL:
+            proc.returncode = -9
+
+    monkeypatch.setattr("ncat.agent_process.os.killpg", fake_killpg)
+
+    await conn.agent_process.stop()
+
+    assert proc.stdin.closed is True
+    assert killpg_calls == [(4321, signal.SIGTERM), (4321, signal.SIGKILL)]
+    assert conn.agent_process._process is None
+    assert conn.agent_process._process_group_id is None
+
+
+@pytest.mark.asyncio
+async def test_agent_stop_resets_process_state_after_graceful_exit(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+    acp_conn = DummyAcpConnection()
+    proc = DummyProcess()
+    conn.agent_process._conn = acp_conn
+    conn.agent_process._process = cast(Any, proc)
+    conn.agent_process._process_group_id = 4321
+
+    await conn.agent_process.stop()
+
+    assert proc.stdin.closed is True
+    assert proc.terminate_calls == 0
+    assert proc.kill_calls == 0
+    assert conn.agent_process._process is None
+    assert conn.agent_process._process_group_id is None
 
 
 @pytest.mark.asyncio

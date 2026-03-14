@@ -15,7 +15,9 @@ import json
 import logging
 import os
 import secrets
+import signal
 import shutil
+import subprocess
 import sys
 from typing import Any, cast
 
@@ -49,6 +51,8 @@ type PromptBlock = (
 # Maximum length of the JSON dump to log per message (avoids flooding logs
 # with large prompt/response payloads).
 _LOG_MAX_LEN = 2000
+_GRACEFUL_EXIT_TIMEOUT_SEC = 1.0
+_FORCE_KILL_TIMEOUT_SEC = 2.0
 
 
 def _acp_stream_observer(event: Any) -> None:
@@ -116,6 +120,8 @@ class AgentProcess:
 
         # Agent prompt capabilities (populated on initialize)
         self._supports_image: bool = False
+        # POSIX process group id used for whole-tree shutdown.
+        self._process_group_id: int | None = None
 
     @property
     def conn(self) -> ClientSideConnection | None:
@@ -247,6 +253,7 @@ class AgentProcess:
                 stdout=aio_subprocess.PIPE,
                 cwd=self._cwd,
                 env=proc_env,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
         else:
             self._process = await asyncio.create_subprocess_exec(
@@ -256,7 +263,15 @@ class AgentProcess:
                 stdout=aio_subprocess.PIPE,
                 cwd=self._cwd,
                 env=proc_env,
+                start_new_session=True,
             )
+
+        if self._process is not None:
+            if os.name == "posix":
+                with contextlib.suppress(ProcessLookupError):
+                    self._process_group_id = os.getpgid(self._process.pid)
+            else:
+                self._process_group_id = self._process.pid
 
         if self._process.stdin is None or self._process.stdout is None:
             await self.stop()
@@ -325,15 +340,76 @@ class AgentProcess:
 
         # Terminate the agent subprocess
         if self._process is not None and self._process.returncode is None:
-            info_event(
-                logger,
-                "agent_spawn_stop",
-                "Terminating agent subprocess",
-                pid=self._process.pid,
-            )
-            self._process.terminate()
-            with contextlib.suppress(ProcessLookupError):
-                await self._process.wait()
-            self._process = None
+            if self._process.stdin is not None:
+                self._process.stdin.close()
+                with contextlib.suppress(Exception):
+                    await self._process.stdin.wait_closed()
+
+            if await self._wait_for_exit(_GRACEFUL_EXIT_TIMEOUT_SEC):
+                info_event(
+                    logger,
+                    "agent_spawn_stopped_graceful",
+                    "Agent subprocess exited after ACP shutdown",
+                    pid=self._process.pid,
+                    pgid=self._process_group_id,
+                )
+            else:
+                await self._terminate_process_tree()
+
+        self._supports_image = False
+        self._process = None
+        self._process_group_id = None
 
         info_event(logger, "agent_spawn_stopped", "Agent stopped")
+
+    async def _wait_for_exit(self, timeout: float) -> bool:
+        if self._process is None or self._process.returncode is not None:
+            return True
+        try:
+            await asyncio.wait_for(self._process.wait(), timeout=timeout)
+            return True
+        except TimeoutError:
+            return False
+
+    async def _terminate_process_tree(self) -> None:
+        assert self._process is not None
+
+        info_event(
+            logger,
+            "agent_spawn_stop",
+            "Terminating agent subprocess tree",
+            pid=self._process.pid,
+            pgid=self._process_group_id,
+        )
+
+        self._signal_process_tree(signal.SIGTERM)
+        if await self._wait_for_exit(_FORCE_KILL_TIMEOUT_SEC):
+            return
+
+        info_event(
+            logger,
+            "agent_spawn_kill",
+            "Force killing agent subprocess tree",
+            pid=self._process.pid,
+            pgid=self._process_group_id,
+        )
+        self._signal_process_tree(signal.SIGKILL)
+        with contextlib.suppress(ProcessLookupError):
+            await self._process.wait()
+
+    def _signal_process_tree(self, sig: signal.Signals) -> None:
+        if self._process is None or self._process.returncode is not None:
+            return
+
+        if os.name == "posix" and self._process_group_id is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self._process_group_id, sig)
+            return
+
+        if sig == signal.SIGKILL:
+            with contextlib.suppress(ProcessLookupError):
+                self._process.kill()
+            return
+
+        with contextlib.suppress(ProcessLookupError):
+            self._process.terminate()

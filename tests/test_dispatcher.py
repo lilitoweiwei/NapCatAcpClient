@@ -219,16 +219,18 @@ async def test_next_text_consumes_large_buffered_image_as_file(
             self.url = "http://example.com/huge.png"
             self.data = b"x" * (6 * 1024 * 1024)
             self.mime_type = "image/png"
-            self.suggested_name = "huge.png"
 
     async def _fake_download_image(url: str, timeout_seconds: float):
         assert url == "http://example.com/huge.png"
         assert timeout_seconds > 0
         return _DownloadedImage()
 
-    monkeypatch.setattr("ncat.prompt_runner.download_image", _fake_download_image)
+    def _fake_prepare_image_for_inline(downloaded_image, *, max_inline_bytes: int):
+        assert max_inline_bytes == 2 * 1024 * 1024
+        return _DownloadedImage()
 
-    handler._ai._large_image_threshold_bytes = 5 * 1024 * 1024
+    monkeypatch.setattr("ncat.prompt_runner.download_image", _fake_download_image)
+    monkeypatch.setattr("ncat.prompt_runner.prepare_image_for_inline", _fake_prepare_image_for_inline)
 
     await handler.handle_message(
         _private_segments_event(
@@ -242,9 +244,7 @@ async def test_next_text_consumes_large_buffered_image_as_file(
 
     assert len(mock_agent.calls) == 1
     _, prompt = mock_agent.calls[0]
-    assert "[图片已按文件附件处理]" in prompt
-    assert "This image exceeded the inline-image threshold" in prompt
-    assert "/.qqfiles/huge.png" in prompt
+    assert "[图片]" in prompt
 
 
 async def test_next_text_consumes_buffered_files_and_images(handler_env, monkeypatch, tmp_path: Path) -> None:

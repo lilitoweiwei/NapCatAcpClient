@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ncat.log import warning_event
-from ncat.models import DownloadedImage, FileAttachment, SavedFileAttachment
+from ncat.models import FileAttachment, SavedFileAttachment
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -75,39 +75,6 @@ def guess_mime_type_from_name(name: str) -> str | None:
     """Best-effort MIME guess from a filename or URL path."""
     mime_type, _ = mimetypes.guess_type(name)
     return mime_type
-
-
-def build_saved_image_note(reason: str = "") -> str:
-    """Build the system hint used when an image is surfaced as a saved file."""
-    base = "The user attached an image"
-    if reason:
-        base += f". {reason}"
-    else:
-        base += "."
-    return base
-
-
-def save_downloaded_image(
-    image: DownloadedImage,
-    *,
-    workspace_cwd: str,
-    inbox_dirname: str,
-    prompt_note: str,
-) -> SavedFileAttachment:
-    """Persist a downloaded image into the workspace inbox."""
-    inbox_dir = ensure_inbox_dir(workspace_cwd, inbox_dirname)
-    target_path = allocate_target_path(inbox_dir, image.suggested_name)
-    target_path.write_bytes(image.data)
-    return SavedFileAttachment(
-        name=target_path.name,
-        saved_path=str(target_path),
-        original_file_id=image.url,
-        size=len(image.data),
-        kind="image",
-        prompt_note=prompt_note,
-    )
-
-
 async def _download_to_path(url: str, target_path: Path, timeout_seconds: float) -> None:
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout_seconds) as client:
         response = await client.get(url)

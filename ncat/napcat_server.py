@@ -42,7 +42,7 @@ class NcatNapCatServer:
         file_download_timeout: float = 30.0,
         pending_ttl_seconds: float = 1800.0,
         max_file_size_mb: int | None = None,
-        large_image_threshold_mb: int = 5,
+        max_inline_image_mb: int = 2,
         bsp_client=None,
     ) -> None:
         # WebSocket bind address and port
@@ -75,7 +75,7 @@ class NcatNapCatServer:
             file_download_timeout=file_download_timeout,
             pending_ttl_seconds=pending_ttl_seconds,
             max_file_size_mb=max_file_size_mb,
-            large_image_threshold_mb=large_image_threshold_mb,
+            max_inline_image_mb=max_inline_image_mb,
             get_file_fn=self._get_file_via_api,
             bsp_client=bsp_client,
         )

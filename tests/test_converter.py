@@ -299,44 +299,6 @@ def test_build_prompt_blocks_download_failed_falls_back_to_url() -> None:
     assert not any(isinstance(b, ImageContentBlock) for b in blocks)
 
 
-def test_build_prompt_blocks_large_image_saved_as_file() -> None:
-    event = {
-        "self_id": BOT_ID,
-        "user_id": 111,
-        "message_type": "private",
-        "sender": {"user_id": 111, "nickname": "User", "card": ""},
-        "message": [
-            {"type": "text", "data": {"text": "see"}},
-            {"type": "image", "data": {"url": "http://example.com/a.png"}},
-        ],
-        "post_type": "message",
-    }
-    parsed = onebot_to_internal(event, BOT_ID)
-    parsed.pending_files.append(
-        SavedFileAttachment(
-            name="a.png",
-            saved_path="/workspace/default/.qqfiles/a.png",
-            original_file_id="http://example.com/a.png",
-            size=6 * 1024 * 1024,
-            kind="image",
-            prompt_note=(
-                "The user attached an image. This image exceeded the inline-image "
-                "threshold and was handled as a file attachment instead"
-            ),
-        )
-    )
-
-    blocks = build_prompt_blocks(
-        parsed,
-        prompt_images=[PromptImageAttachment(replacement_text="[图片已按文件附件处理]")],
-        agent_supports_image=True,
-    )
-    assert isinstance(blocks[0], TextContentBlock)
-    assert "[图片已按文件附件处理]" in blocks[0].text
-    assert "This image exceeded the inline-image threshold" in blocks[0].text
-    assert not any(isinstance(b, ImageContentBlock) for b in blocks)
-
-
 def test_build_context_header_appends_single_file_hint() -> None:
     parsed = ParsedMessage(
         chat_id="private:111",

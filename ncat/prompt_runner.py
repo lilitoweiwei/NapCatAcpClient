@@ -13,16 +13,14 @@ from ncat.agent_manager import (
     AgentErrorWithPartialContent,
     AgentManager,
 )
-from ncat.file_ingress import build_saved_image_note, save_downloaded_image
-from ncat.image_utils import download_image, encode_image_base64
-from ncat.log import error_event, info_event, warning_event
-from ncat.models import (
-    ContentPart,
-    DownloadedImage,
-    ParsedMessage,
-    PromptImageAttachment,
-    VisibleTurnEvent,
+from ncat.image_utils import (
+    ImagePreparationError,
+    download_image,
+    encode_image_base64,
+    prepare_image_for_inline,
 )
+from ncat.log import error_event, info_event, warning_event
+from ncat.models import ContentPart, DownloadedImage, ParsedMessage, PromptImageAttachment, VisibleTurnEvent
 from ncat.prompt_builder import build_prompt_blocks
 
 logger = logging.getLogger("ncat.prompt_runner")
@@ -39,27 +37,24 @@ _MSG_THINKING = "消息已收到，AI 正在思考中，请稍候..."
 _MSG_THINKING_LONG = "AI 思考时间较长，你可以发送 /stop 中断当前思考。"
 
 
-def _coerce_downloaded_image(
-    downloaded: DownloadedImage | tuple[str, str] | None,
-    *,
-    url: str,
-) -> DownloadedImage | tuple[str, str] | None:
-    """Accept legacy test doubles that still return (base64, mime)."""
+def _coerce_downloaded_image(downloaded: object, *, url: str) -> DownloadedImage | tuple[str, str] | None:
+    """Accept legacy test doubles that still return `(base64, mime)` tuples."""
     if downloaded is None or isinstance(downloaded, DownloadedImage):
         return downloaded
     if isinstance(downloaded, tuple) and len(downloaded) == 2:
         data_b64, mime_type = downloaded
-        return data_b64, mime_type
-    if all(hasattr(downloaded, attr) for attr in ("data", "mime_type", "suggested_name")):
-        return DownloadedImage(
-            url=getattr(downloaded, "url", url),
-            data=getattr(downloaded, "data"),
-            mime_type=getattr(downloaded, "mime_type"),
-            suggested_name=getattr(downloaded, "suggested_name"),
-        )
+        if isinstance(data_b64, str) and isinstance(mime_type, str):
+            return data_b64, mime_type
+    if all(hasattr(downloaded, attr) for attr in ("data", "mime_type")):
+        data = getattr(downloaded, "data")
+        mime_type = getattr(downloaded, "mime_type")
+        if isinstance(data, bytes) and isinstance(mime_type, str):
+            return DownloadedImage(
+                url=getattr(downloaded, "url", url),
+                data=data,
+                mime_type=mime_type,
+            )
     return None
-
-
 class PromptRunner:
     """
     Manages the full AI request lifecycle: prompt building, ACP agent
@@ -77,8 +72,7 @@ class PromptRunner:
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
         image_download_timeout: float = 15.0,
-        file_inbox_dirname: str = ".qqfiles",
-        large_image_threshold_mb: int = 5,
+        max_inline_image_mb: int = 2,
     ) -> None:
         # ACP agent manager for sending prompts and cancellation
         self._agent_manager = agent_manager
@@ -97,8 +91,7 @@ class PromptRunner:
         self._thinking_long_notify_seconds = thinking_long_notify_seconds
         # Timeout for downloading images from NapCat URLs (used when agent supports images)
         self._image_download_timeout = image_download_timeout
-        self._file_inbox_dirname = file_inbox_dirname
-        self._large_image_threshold_bytes = max(0, large_image_threshold_mb) * 1024 * 1024
+        self._max_inline_image_bytes = max(1, max_inline_image_mb) * 1024 * 1024
         # Active AI processing tasks per chat, keyed by chat_id
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
         # Number of content parts already flushed to the user for the active turn.
@@ -171,7 +164,6 @@ class PromptRunner:
             )(chat_id)
             prompt_images: list[PromptImageAttachment] = []
             if supports_image:
-                workspace_cwd = self._agent_manager.get_workspace_cwd(chat_id)
                 for att in parsed.images:
                     if att.url:
                         downloaded = await download_image(
@@ -180,15 +172,9 @@ class PromptRunner:
                         )
                         downloaded = _coerce_downloaded_image(downloaded, url=att.url)
                         if downloaded is None:
-                            prompt_images.append(
-                                PromptImageAttachment(
-                                    replacement_text=(
-                                        f"[图片 url={att.url.strip()}]" if att.url.strip() else "[图片]"
-                                    )
-                                )
+                            raise ImagePreparationError(
+                                "图片下载失败，无法发送给 Agent，请稍后重试。"
                             )
-                            continue
-
                         if isinstance(downloaded, tuple):
                             data_b64, mime_type = downloaded
                             prompt_images.append(
@@ -199,36 +185,11 @@ class PromptRunner:
                                 )
                             )
                             continue
-
-                        if (
-                            self._large_image_threshold_bytes
-                            and len(downloaded.data) > self._large_image_threshold_bytes
-                        ):
-                            saved = save_downloaded_image(
-                                downloaded,
-                                workspace_cwd=workspace_cwd,
-                                inbox_dirname=self._file_inbox_dirname,
-                                prompt_note=build_saved_image_note(
-                                    "This image exceeded the inline-image threshold and was handled as a file attachment instead"
-                                ),
-                            )
-                            parsed.pending_files.append(saved)
-                            info_event(
-                                logger,
-                                "image_saved_as_file",
-                                "Saved large image as workspace file attachment",
-                                chat_id=chat_id,
-                                url=att.url,
-                                saved_path=saved.saved_path,
-                                size_bytes=len(downloaded.data),
-                                threshold_bytes=self._large_image_threshold_bytes,
-                            )
-                            prompt_images.append(
-                                PromptImageAttachment(replacement_text="[图片已按文件附件处理]")
-                            )
-                            continue
-
-                        data_b64, mime_type = encode_image_base64(downloaded)
+                        prepared = prepare_image_for_inline(
+                            downloaded,
+                            max_inline_bytes=self._max_inline_image_bytes,
+                        )
+                        data_b64, mime_type = encode_image_base64(prepared)
                         prompt_images.append(
                             PromptImageAttachment(
                                 replacement_text="[图片]",
@@ -239,12 +200,14 @@ class PromptRunner:
                         info_event(
                             logger,
                             "image_inline_selected",
-                            "Selected inline ACP image delivery",
+                            "Prepared inline ACP image delivery",
                             chat_id=chat_id,
                             url=att.url,
+                            original_mime=downloaded.mime_type,
                             mime_type=mime_type,
-                            size_bytes=len(downloaded.data),
-                            threshold_bytes=self._large_image_threshold_bytes,
+                            original_size_bytes=len(downloaded.data),
+                            final_size_bytes=len(prepared.data),
+                            max_inline_bytes=self._max_inline_image_bytes,
                         )
                     else:
                         prompt_images.append(PromptImageAttachment(replacement_text="[图片]"))
@@ -359,6 +322,16 @@ class PromptRunner:
                     event, f"Agent 异常：{e}\n当前会话已关闭，下次对话将自动开启新会话。"
                 )
                 await self._agent_manager.close_session(chat_key)
+
+        except ImagePreparationError as e:
+            warning_event(
+                logger,
+                "image_prepare_fail",
+                "Failed to prepare image for inline delivery",
+                chat_id=chat_key,
+                err=str(e),
+            )
+            await self._reply_fn(event, str(e))
 
         except TimeoutError as e:
             # ACP initialize or connection timed out (e.g. agent cold start > timeout)

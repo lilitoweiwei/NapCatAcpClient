@@ -89,8 +89,8 @@ class UxConfig:
     max_reply_text_length: int = 5000
     # Timeout (seconds) for downloading images from NapCat-provided URLs
     image_download_timeout: float = 15.0
-    # Images larger than this threshold are saved as files instead of inline ACP images.
-    large_image_threshold_mb: int = 5
+    # Maximum processed image size in MiB for inline ACP delivery.
+    max_inline_image_mb: int = 2
 
 
 @dataclass

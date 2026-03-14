@@ -144,8 +144,8 @@ async def test_private_image_forwarded_to_agent_when_supported(full_stack, monke
     assert any(isinstance(b, ImageContentBlock) for b in blocks)
 
 
-async def test_private_image_download_failed_falls_back_to_url(full_stack, monkeypatch) -> None:
-    """If image download fails, ncat should send '[图片 url=...]' to the agent."""
+async def test_private_image_download_failed_replies_user(full_stack, monkeypatch) -> None:
+    """If image download fails, ncat should return a user-facing error."""
     _, mock, mock_agent = full_stack
     mock_agent._supports_image = True  # test hook
 
@@ -178,16 +178,17 @@ async def test_private_image_download_failed_falls_back_to_url(full_stack, monke
     api_call = await mock.recv_api_call(timeout=5.0)
     assert api_call is not None
     assert api_call["action"] == "send_private_msg"
+    text = "".join(
+        part.get("data", {}).get("text", "")
+        for part in api_call["params"]["message"]
+        if part.get("type") == "text"
+    )
+    assert text == "图片下载失败，无法发送给 Agent，请稍后重试。"
+    assert not mock_agent.calls_blocks
 
-    assert mock_agent.calls_blocks
-    _, blocks = mock_agent.calls_blocks[0]
-    assert isinstance(blocks[0], TextContentBlock)
-    assert "[图片 url=http://example.com/a.png]" in blocks[0].text
-    assert not any(isinstance(b, ImageContentBlock) for b in blocks)
 
-
-async def test_private_large_image_is_saved_as_file(full_stack, monkeypatch, tmp_path: Path) -> None:
-    """Large private images should be saved to the workspace and not sent inline."""
+async def test_private_image_is_prepared_inline(full_stack, monkeypatch, tmp_path: Path) -> None:
+    """Private images should be preprocessed and still sent inline to the agent."""
     _, mock, mock_agent = full_stack
     mock_agent._supports_image = True
     mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
@@ -197,14 +198,18 @@ async def test_private_large_image_is_saved_as_file(full_stack, monkeypatch, tmp
             self.url = "http://example.com/huge.png"
             self.data = b"x" * (6 * 1024 * 1024)
             self.mime_type = "image/png"
-            self.suggested_name = "huge.png"
 
     async def _fake_download_image(url: str, timeout_seconds: float):
         assert url == "http://example.com/huge.png"
         assert timeout_seconds > 0
         return _DownloadedImage()
 
+    def _fake_prepare_image_for_inline(downloaded_image, *, max_inline_bytes: int):
+        assert max_inline_bytes == 2 * 1024 * 1024
+        return _DownloadedImage()
+
     monkeypatch.setattr(prompt_runner_module, "download_image", _fake_download_image)
+    monkeypatch.setattr(prompt_runner_module, "prepare_image_for_inline", _fake_prepare_image_for_inline)
 
     await mock._send_event(
         {
@@ -233,10 +238,8 @@ async def test_private_large_image_is_saved_as_file(full_stack, monkeypatch, tmp
     assert mock_agent.calls_blocks
     _, blocks = mock_agent.calls_blocks[0]
     assert isinstance(blocks[0], TextContentBlock)
-    assert "[图片已按文件附件处理]" in blocks[0].text
-    assert "This image exceeded the inline-image threshold" in blocks[0].text
-    assert "/.qqfiles/huge.png" in blocks[0].text
-    assert not any(isinstance(b, ImageContentBlock) for b in blocks)
+    assert "[图片]" in blocks[0].text
+    assert any(isinstance(b, ImageContentBlock) for b in blocks)
 
 
 async def test_agent_image_reply_sends_image_segment(full_stack) -> None:

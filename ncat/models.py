@@ -40,7 +40,6 @@ class DownloadedImage:
     url: str
     data: bytes
     mime_type: str
-    suggested_name: str
 
 
 @dataclass

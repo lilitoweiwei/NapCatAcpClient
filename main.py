@@ -91,6 +91,11 @@ async def main() -> None:
         thinking_long_notify_seconds=config.ux.thinking_long_notify_seconds,
         max_reply_text_length=config.ux.max_reply_text_length,
         image_download_timeout=config.ux.image_download_timeout,
+        file_ingress_enabled=config.file_ingress.enabled,
+        file_inbox_dirname=config.file_ingress.inbox_dirname,
+        file_download_timeout=config.file_ingress.download_timeout,
+        pending_ttl_seconds=config.file_ingress.pending_ttl_seconds,
+        max_file_size_mb=config.file_ingress.max_file_size_mb,
         bsp_client=bsp_client,
     )
 

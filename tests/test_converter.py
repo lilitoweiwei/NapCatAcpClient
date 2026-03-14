@@ -9,7 +9,7 @@ from ncat.converter import (
     content_to_onebot_batches,
     onebot_to_internal,
 )
-from ncat.models import ContentPart
+from ncat.models import ContentPart, ParsedMessage, SavedFileAttachment
 from ncat.prompt_builder import build_context_header, build_prompt_blocks
 
 BOT_ID = 1234567890
@@ -98,6 +98,51 @@ def test_parse_mixed_segments() -> None:
     assert parsed.text == "看这个[图片]好看吗[表情]"
     assert len(parsed.images) == 1
     assert parsed.images[0].url == "http://example.com/img.jpg"
+
+
+def test_parse_private_file_segment() -> None:
+    event = {
+        "self_id": BOT_ID,
+        "user_id": 111,
+        "message_type": "private",
+        "sender": {"user_id": 111, "nickname": "User", "card": ""},
+        "message": [
+            {
+                "type": "file",
+                "data": {
+                    "file": "report.pdf",
+                    "file_id": "f-1",
+                    "file_size": "123",
+                    "url": "http://example.com/report.pdf",
+                },
+            }
+        ],
+        "post_type": "message",
+    }
+    parsed = onebot_to_internal(event, BOT_ID)
+    assert parsed.text == "[文件]"
+    assert parsed.has_text is False
+    assert len(parsed.files) == 1
+    assert parsed.files[0].name == "report.pdf"
+    assert parsed.files[0].file_id == "f-1"
+    assert parsed.files[0].size == 123
+
+
+def test_parse_private_file_segment_missing_fields() -> None:
+    event = {
+        "self_id": BOT_ID,
+        "user_id": 111,
+        "message_type": "private",
+        "sender": {"user_id": 111, "nickname": "User", "card": ""},
+        "message": [{"type": "file", "data": {}}],
+        "post_type": "message",
+    }
+    parsed = onebot_to_internal(event, BOT_ID)
+    assert parsed.text == "[文件]"
+    assert len(parsed.files) == 1
+    assert parsed.files[0].name == ""
+    assert parsed.files[0].file_id == ""
+    assert parsed.files[0].size is None
 
 
 def test_parse_at_other_user() -> None:
@@ -246,6 +291,62 @@ def test_build_prompt_blocks_download_failed_falls_back_to_url() -> None:
     assert isinstance(blocks[0], TextContentBlock)
     assert "[图片 url=http://example.com/a.png]" in blocks[0].text
     assert not any(isinstance(b, ImageContentBlock) for b in blocks)
+
+
+def test_build_context_header_appends_single_file_hint() -> None:
+    parsed = ParsedMessage(
+        chat_id="private:111",
+        text="Please check",
+        is_at_bot=False,
+        sender_name="Alice",
+        sender_id=111,
+        group_name=None,
+        message_type="private",
+        pending_files=[
+            SavedFileAttachment(
+                name="foo.pdf",
+                saved_path="/workspace/default/.qqfiles/foo.pdf",
+                original_file_id="f-1",
+                size=123,
+            )
+        ],
+    )
+    header = build_context_header(parsed)
+    assert "Please check" in header
+    assert (
+        "[SYSTEM: The user attached a file. It has been saved at "
+        "/workspace/default/.qqfiles/foo.pdf]" in header
+    )
+
+
+def test_build_context_header_appends_multi_file_hint() -> None:
+    parsed = ParsedMessage(
+        chat_id="private:111",
+        text="Please check",
+        is_at_bot=False,
+        sender_name="Alice",
+        sender_id=111,
+        group_name=None,
+        message_type="private",
+        pending_files=[
+            SavedFileAttachment(
+                name="foo.pdf",
+                saved_path="/workspace/default/.qqfiles/foo.pdf",
+                original_file_id="f-1",
+                size=123,
+            ),
+            SavedFileAttachment(
+                name="bar.csv",
+                saved_path="/workspace/default/.qqfiles/bar.csv",
+                original_file_id="f-2",
+                size=456,
+            ),
+        ],
+    )
+    header = build_context_header(parsed)
+    assert "[SYSTEM: The user attached files. They have been saved at:" in header
+    assert "- /workspace/default/.qqfiles/foo.pdf" in header
+    assert "- /workspace/default/.qqfiles/bar.csv]" in header
 
 
 # --- build_context_header tests ---

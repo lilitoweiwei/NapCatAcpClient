@@ -9,6 +9,7 @@ import logging
 from acp import image_block, text_block
 from acp.schema import ImageContentBlock, TextContentBlock
 
+from ncat.file_ingress import file_hint_text
 from ncat.log import warning_event
 from ncat.models import ParsedMessage
 
@@ -29,7 +30,12 @@ def build_context_header(parsed: ParsedMessage) -> str:
             f"[Group chat {parsed.group_name}({group_id}), "
             f"user {parsed.sender_name}({parsed.sender_id})]"
         )
-    return f"{header}\n{parsed.text}"
+    body = parsed.text
+    file_hint = file_hint_text(parsed.pending_files)
+    if file_hint:
+        separator = "\n" if body else ""
+        body = f"{body}{separator}{file_hint}"
+    return f"{header}\n{body}"
 
 
 def _replace_image_placeholders(text: str, replacements: list[str]) -> str:
@@ -97,17 +103,23 @@ def build_prompt_blocks(
 
     body_text = _replace_image_placeholders(parsed.text, replacements)
 
-    # Build a context header so the agent knows who is speaking and where.
-    if parsed.message_type == "private":
-        header = f"[Private chat, user {parsed.sender_name}({parsed.sender_id})]"
-    else:
-        group_id = parsed.chat_id.split(":")[1]
-        header = (
-            f"[Group chat {parsed.group_name}({group_id}), "
-            f"user {parsed.sender_name}({parsed.sender_id})]"
+    prompt_text = build_context_header(
+        ParsedMessage(
+            chat_id=parsed.chat_id,
+            text=body_text,
+            is_at_bot=parsed.is_at_bot,
+            sender_name=parsed.sender_name,
+            sender_id=parsed.sender_id,
+            group_name=parsed.group_name,
+            message_type=parsed.message_type,
+            images=[],
+            files=parsed.files,
+            pending_files=parsed.pending_files,
+            has_text=parsed.has_text,
         )
+    )
 
-    blocks: list[TextContentBlock | ImageContentBlock] = [text_block(f"{header}\n{body_text}")]
+    blocks: list[TextContentBlock | ImageContentBlock] = [text_block(prompt_text)]
     if agent_supports_image:
         for downloaded in downloaded_images:
             if downloaded is None:

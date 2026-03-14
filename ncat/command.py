@@ -36,6 +36,7 @@ async def handle_new(
     reply_fn,
     agent_manager: AgentManager,
     cancel_fn=None,
+    pending_input_store=None,
     **kwargs,
 ) -> None:
     """Handle /new and /new <workspace> commands.
@@ -55,6 +56,9 @@ async def handle_new(
 
     if cancel_fn is not None:
         cancel_fn(chat_id)
+
+    if pending_input_store is not None:
+        pending_input_store.clear(chat_id)
 
     # Close current ACP session and disconnect
     await agent_manager.close_session(chat_id)

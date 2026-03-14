@@ -1,6 +1,7 @@
 """Integration tests: full pipeline from mock NapCat through ACP agent mock and back."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -200,6 +201,59 @@ async def test_agent_image_reply_sends_image_segment(full_stack) -> None:
     seg = api_call["params"]["message"][0]
     assert seg["type"] == "image"
     assert seg["data"]["file"] == "base64://aGVsbG8="
+
+
+async def test_private_file_and_image_wait_for_first_text(full_stack, monkeypatch, tmp_path: Path) -> None:
+    _, mock, mock_agent = full_stack
+    mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
+
+    async def _fake_download_private_file(**kwargs):
+        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox.mkdir(parents=True, exist_ok=True)
+        target = inbox / "foo.pdf"
+        target.write_text("pdf")
+        from ncat.models import SavedFileAttachment
+
+        return SavedFileAttachment(
+            name="foo.pdf",
+            saved_path=str(target),
+            original_file_id="f-1",
+            size=3,
+        )
+
+    monkeypatch.setattr("ncat.dispatcher.best_effort_download_private_file", _fake_download_private_file)
+
+    await mock.send_private_segments(
+        111,
+        "Alice",
+        [{"type": "file", "data": {"file": "foo.pdf", "file_id": "f-1"}}],
+        raw_message="[CQ:file]",
+    )
+    first_reply = await mock.recv_api_call(timeout=5.0)
+    assert first_reply is not None
+    assert "已收到文件" in first_reply["params"]["message"][0]["data"]["text"]
+    assert len(mock_agent.calls) == 0
+
+    await mock.send_private_segments(
+        111,
+        "Alice",
+        [{"type": "image", "data": {"url": "http://example.com/a.png"}}],
+        raw_message="[CQ:image]",
+    )
+    second_reply = await mock.recv_api_call(timeout=5.0)
+    assert second_reply is not None
+    assert "请继续发送说明" in second_reply["params"]["message"][0]["data"]["text"]
+    assert len(mock_agent.calls) == 0
+
+    await mock.send_private_message(111, "Alice", "please check")
+    final_reply = await mock.recv_api_call(timeout=5.0)
+    assert final_reply is not None
+    assert final_reply["params"]["message"][0]["data"]["text"] == "Integration AI response"
+
+    assert len(mock_agent.calls) == 1
+    _, prompt = mock_agent.calls[0]
+    assert "please check" in prompt
+    assert "[SYSTEM: The user attached a file. It has been saved at" in prompt
 
 
 async def test_full_group_conversation(full_stack) -> None:

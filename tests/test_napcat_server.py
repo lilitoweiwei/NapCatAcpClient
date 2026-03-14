@@ -201,3 +201,39 @@ async def test_disconnect_closes_all_sessions(server_and_mock) -> None:
 
     # Agent manager should have been told to close all sessions
     assert mock_agent.all_sessions_closed
+
+
+async def test_disconnect_clears_pending_inputs(server_and_mock, monkeypatch, tmp_path) -> None:
+    server, mock, mock_agent = server_and_mock
+    mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
+
+    async def _fake_download_private_file(**kwargs):
+        inbox = tmp_path / "default" / ".qqfiles"
+        inbox.mkdir(parents=True, exist_ok=True)
+        target = inbox / "foo.pdf"
+        target.write_text("pdf")
+        from ncat.models import SavedFileAttachment
+
+        return SavedFileAttachment(
+            name="foo.pdf",
+            saved_path=str(target),
+            original_file_id="f-1",
+            size=3,
+        )
+
+    monkeypatch.setattr("ncat.dispatcher.best_effort_download_private_file", _fake_download_private_file)
+
+    await mock.send_private_segments(
+        111,
+        "Alice",
+        [{"type": "file", "data": {"file": "foo.pdf", "file_id": "f-1"}}],
+        raw_message="[CQ:file]",
+    )
+    await mock.recv_api_call(timeout=5.0)
+
+    assert server._dispatcher._pending_inputs.peek("private:111") is not None
+
+    await mock.close()
+    await asyncio.sleep(0.3)
+
+    assert server._dispatcher._pending_inputs.peek("private:111") is None

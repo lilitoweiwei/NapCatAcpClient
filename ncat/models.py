@@ -12,6 +12,36 @@ class ImageAttachment:
 
 
 @dataclass
+class FileAttachment:
+    """Raw file reference extracted from OneBot message segments."""
+
+    name: str
+    file_id: str
+    url: str = ""
+    size: int | None = None
+
+
+@dataclass
+class SavedFileAttachment:
+    """Workspace-local QQ file ready to be surfaced to the agent."""
+
+    name: str
+    saved_path: str
+    original_file_id: str
+    size: int | None = None
+
+
+@dataclass
+class PendingChatInput:
+    """Buffered attachment-only inputs waiting for a later text message."""
+
+    files: list[SavedFileAttachment] = field(default_factory=list)
+    images: list[ImageAttachment] = field(default_factory=list)
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+
+@dataclass
 class ContentPart:
     """Ordered content part for AI replies (text and images)."""
 
@@ -57,3 +87,9 @@ class ParsedMessage:
     message_type: str
     # Raw image attachments (URLs) extracted from the message segments
     images: list[ImageAttachment] = field(default_factory=list)
+    # Raw file attachments extracted from private OneBot message segments
+    files: list[FileAttachment] = field(default_factory=list)
+    # Files buffered before this text-bearing message and already saved locally
+    pending_files: list[SavedFileAttachment] = field(default_factory=list)
+    # Whether the incoming event contains any non-empty text segment
+    has_text: bool = False

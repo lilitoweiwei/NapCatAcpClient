@@ -130,6 +130,10 @@ class AgentManager:
             return conn.workspace_cwd
         return self._next_session_cwd.get(chat_id, self._default_workspace_path)
 
+    def get_workspace_cwd(self, chat_id: str) -> str:
+        """Return the workspace path currently selected for the chat."""
+        return self._get_connection_cwd(chat_id)
+
     def _workspace_name_from_cwd(self, cwd: str) -> str:
         """Return the workspace-relative name for a resolved cwd."""
         try:

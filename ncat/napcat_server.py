@@ -37,6 +37,11 @@ class NcatNapCatServer:
         thinking_long_notify_seconds: float = 30,
         max_reply_text_length: int = 5000,
         image_download_timeout: float = 15.0,
+        file_ingress_enabled: bool = True,
+        file_inbox_dirname: str = ".qqfiles",
+        file_download_timeout: float = 30.0,
+        pending_ttl_seconds: float = 1800.0,
+        max_file_size_mb: int | None = None,
         bsp_client=None,
     ) -> None:
         # WebSocket bind address and port
@@ -64,6 +69,12 @@ class NcatNapCatServer:
             thinking_notify_seconds=thinking_notify_seconds,
             thinking_long_notify_seconds=thinking_long_notify_seconds,
             image_download_timeout=image_download_timeout,
+            file_ingress_enabled=file_ingress_enabled,
+            file_inbox_dirname=file_inbox_dirname,
+            file_download_timeout=file_download_timeout,
+            pending_ttl_seconds=pending_ttl_seconds,
+            max_file_size_mb=max_file_size_mb,
+            get_file_fn=self._get_file_via_api,
             bsp_client=bsp_client,
         )
 
@@ -126,6 +137,7 @@ class NcatNapCatServer:
                 self._connection = None
                 # Close all ACP sessions and disconnect from agent when NapCat disconnects
                 info_event(logger, "ws_cleanup", "NapCat disconnected, closing all ACP sessions")
+                self._dispatcher.clear_pending_inputs()
                 await self._agent_manager.close_all_sessions()
                 await self._agent_manager.disconnect()
             info_event(logger, "ws_handler_exit", "Connection handler exited")
@@ -356,6 +368,10 @@ class NcatNapCatServer:
                 message_batches=message_batches,
                 log_fields={"group_id": event.get("group_id")},
             )
+
+    async def _get_file_via_api(self, file_id: str) -> dict | None:
+        """Resolve a private-file download source via NapCat's get_file API."""
+        return await self.send_api("get_file", {"file_id": file_id})
 
     async def send_api(self, action: str, params: dict | None = None) -> dict | None:
         """

@@ -52,6 +52,7 @@ class MockAgentManager:
         self._supports_image: bool = False
         # One-shot workspace selected by /new for the next session
         self.next_session_cwds: dict[str, str | None] = {}
+        self.workspace_cwds: dict[str, str] = {}
         # Connection establishment bookkeeping
         self.ensure_connection_calls: list[str] = []
         # Session lifecycle bookkeeping
@@ -113,6 +114,9 @@ class MockAgentManager:
     def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
         """Record the requested workspace for the next session."""
         self.next_session_cwds[chat_id] = dir_or_none
+
+    def get_workspace_cwd(self, chat_id: str) -> str:
+        return self.workspace_cwds.get(chat_id, f"/workspace/{self.next_session_cwds.get(chat_id) or 'default'}")
 
     async def close_session(self, chat_id: str) -> None:
         self.closed_sessions.add(chat_id)

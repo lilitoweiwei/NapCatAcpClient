@@ -16,8 +16,10 @@ from ncat.agent_manager import AgentManager
 from ncat.bsp_client import BspClient
 from ncat.command import command_registry, get_help_text
 from ncat.converter import onebot_to_internal
+from ncat.file_ingress import best_effort_download_private_file
 from ncat.log import debug_event, error_event, info_event, warning_event
 from ncat.models import ContentPart
+from ncat.pending_inputs import PendingInputStore
 from ncat.prompt_runner import PromptRunner
 
 logger = logging.getLogger("ncat.dispatcher")
@@ -31,6 +33,9 @@ ReplyContentFn = Callable[[dict, list[ContentPart]], Awaitable[None]]
 
 # Busy rejection message (dispatching-level concern)
 _MSG_BUSY = "AI 正在思考中，请等待或使用 /stop 中断。"
+_MSG_ATTACHMENT_WAIT = "已收到文件/图片，请继续发送说明。"
+_MSG_ATTACHMENT_WAIT_FILE = "已收到文件。（文件已保存到 {path}）请继续发送说明。"
+_MSG_ATTACHMENT_FAIL = "文件已收到，但保存失败。请补充说明或稍后重试。"
 
 
 class MessageDispatcher:
@@ -48,6 +53,12 @@ class MessageDispatcher:
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
         image_download_timeout: float = 15.0,
+        file_ingress_enabled: bool = True,
+        file_inbox_dirname: str = ".qqfiles",
+        file_download_timeout: float = 30.0,
+        pending_ttl_seconds: float = 1800.0,
+        max_file_size_mb: int | None = None,
+        get_file_fn: Callable[[str], Awaitable[dict | None]] | None = None,
         bsp_client: BspClient | None = None,
     ) -> None:
         # Callback to send a text reply back to the QQ message source
@@ -56,6 +67,12 @@ class MessageDispatcher:
         self._agent_manager = agent_manager
         # BSP client for background session management
         self._bsp_client = bsp_client
+        self._file_ingress_enabled = file_ingress_enabled
+        self._file_inbox_dirname = file_inbox_dirname
+        self._file_download_timeout = file_download_timeout
+        self._max_file_size_mb = max_file_size_mb
+        self._get_file_fn = get_file_fn
+        self._pending_inputs = PendingInputStore(ttl_seconds=pending_ttl_seconds)
 
         async def _reply_content_fallback(event: dict, parts: list[ContentPart]) -> None:
             # Fallback: deliver text-only if the transport doesn't support images.
@@ -76,6 +93,7 @@ class MessageDispatcher:
         command_registry.set_dependency("agent_manager", agent_manager)
         command_registry.set_dependency("bsp_client", bsp_client)
         command_registry.set_dependency("cancel_fn", self._ai.cancel)
+        command_registry.set_dependency("pending_input_store", self._pending_inputs)
 
         info_event(
             logger,
@@ -124,6 +142,8 @@ class MessageDispatcher:
             parsed = onebot_to_internal(event, bot_id)
             if not parsed:
                 return
+
+            self._pending_inputs.cleanup_expired()
 
             if parsed.message_type == "group" and not parsed.is_at_bot:
                 return
@@ -178,6 +198,14 @@ class MessageDispatcher:
                 await self._reply_fn(event, _MSG_BUSY)
                 return
 
+            if await self._handle_attachment_only_message(parsed, event):
+                return
+
+            self._merge_pending_inputs(parsed)
+
+            if not parsed.has_text:
+                return
+
             # Step 5: Dispatch to AI prompt runner
             # (connection is established on demand in send_prompt)
             debug_event(
@@ -203,3 +231,85 @@ class MessageDispatcher:
             )
             with contextlib.suppress(Exception):
                 await self._reply_fn(event, "处理消息时发生内部错误")
+
+    async def _handle_attachment_only_message(self, parsed, event: dict) -> bool:
+        """Buffer private attachment-only messages until the next text arrives."""
+        if parsed.message_type != "private":
+            return False
+        if parsed.has_text:
+            return False
+        if not parsed.images and not parsed.files:
+            return False
+
+        chat_id = parsed.chat_id
+        saved_files = []
+        file_failed = False
+        if self._file_ingress_enabled:
+            workspace_cwd = self._agent_manager.get_workspace_cwd(chat_id)
+            for attachment in parsed.files:
+                saved = await best_effort_download_private_file(
+                    attachment=attachment,
+                    workspace_cwd=workspace_cwd,
+                    inbox_dirname=self._file_inbox_dirname,
+                    timeout_seconds=self._file_download_timeout,
+                    max_file_size_mb=self._max_file_size_mb,
+                    get_file=self._get_file_data,
+                )
+                if saved is None:
+                    file_failed = True
+                    continue
+                saved_files.append(saved)
+        elif parsed.files:
+            file_failed = True
+
+        if saved_files:
+            self._pending_inputs.add_files(chat_id, saved_files)
+        if parsed.images:
+            self._pending_inputs.add_images(chat_id, parsed.images)
+
+        if file_failed and not saved_files and not parsed.images:
+            await self._reply_fn(event, _MSG_ATTACHMENT_FAIL)
+            return True
+
+        if saved_files and not parsed.images:
+            await self._reply_fn(
+                event,
+                _MSG_ATTACHMENT_WAIT_FILE.format(path=saved_files[0].saved_path),
+            )
+            return True
+
+        await self._reply_fn(event, _MSG_ATTACHMENT_WAIT)
+        return True
+
+    def _merge_pending_inputs(self, parsed) -> None:
+        """Move any buffered attachments into the current text-bearing prompt."""
+        if not parsed.has_text:
+            return
+        pending = self._pending_inputs.pop_all(parsed.chat_id)
+        if pending is None:
+            return
+        parsed.pending_files = pending.files
+        if pending.images:
+            pending_prefix = "\n".join("[图片]" for _ in pending.images)
+            if parsed.text:
+                parsed.text = f"{pending_prefix}\n{parsed.text}"
+            else:
+                parsed.text = pending_prefix
+            parsed.images = [*pending.images, *parsed.images]
+
+    async def _get_file_data(self, file_id: str) -> dict | None:
+        """Fetch file metadata via NapCat if the transport exposed an API callback."""
+        if self._get_file_fn is None:
+            return None
+        response = await self._get_file_fn(file_id)
+        if not isinstance(response, dict):
+            return None
+        data = response.get("data")
+        return data if isinstance(data, dict) else response
+
+    def clear_pending_inputs(self, chat_id: str | None = None) -> None:
+        """Clear buffered attachments for one chat or for all chats."""
+        if chat_id is None:
+            self._pending_inputs.clear_all()
+        else:
+            self._pending_inputs.clear(chat_id)

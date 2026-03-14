@@ -1,6 +1,6 @@
 """Message conversion between OneBot 11 format and internal representation."""
 
-from ncat.models import ContentPart, ImageAttachment, ParsedMessage
+from ncat.models import ContentPart, FileAttachment, ImageAttachment, ParsedMessage
 
 
 def onebot_to_internal(event: dict, bot_id: int) -> ParsedMessage:
@@ -31,13 +31,18 @@ def onebot_to_internal(event: dict, bot_id: int) -> ParsedMessage:
     text_parts: list[str] = []
     is_at_bot = False
     images: list[ImageAttachment] = []
+    files: list[FileAttachment] = []
+    has_text = False
 
     for seg in segments:
         seg_type = seg.get("type", "")
         seg_data = seg.get("data", {})
 
         if seg_type == "text":
-            text_parts.append(seg_data.get("text", ""))
+            seg_text = seg_data.get("text", "")
+            text_parts.append(seg_text)
+            if str(seg_text).strip():
+                has_text = True
 
         elif seg_type == "at":
             # data.qq is a STRING in NapCatQQ, bot_id is int
@@ -55,6 +60,24 @@ def onebot_to_internal(event: dict, bot_id: int) -> ParsedMessage:
             # Preserve image ordering: keep a placeholder entry even if URL is missing.
             images.append(ImageAttachment(url=url))
 
+        elif seg_type == "file":
+            text_parts.append("[文件]")
+            if message_type == "private":
+                size_raw = seg_data.get("file_size")
+                size: int | None
+                try:
+                    size = int(size_raw) if size_raw not in (None, "") else None
+                except (TypeError, ValueError):
+                    size = None
+                files.append(
+                    FileAttachment(
+                        name=str(seg_data.get("file", "")).strip(),
+                        file_id=str(seg_data.get("file_id", "")).strip(),
+                        url=str(seg_data.get("url", "")).strip(),
+                        size=size,
+                    )
+                )
+
         elif seg_type == "face":
             text_parts.append("[表情]")
         # Other segment types (reply, etc.) are silently ignored
@@ -70,6 +93,8 @@ def onebot_to_internal(event: dict, bot_id: int) -> ParsedMessage:
         group_name=group_name,
         message_type=message_type,
         images=images,
+        files=files,
+        has_text=has_text,
     )
 
 

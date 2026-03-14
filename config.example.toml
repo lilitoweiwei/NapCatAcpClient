@@ -68,6 +68,18 @@ max_reply_text_length = 5000
 # Timeout (seconds) for downloading images from NapCat-provided URLs.
 image_download_timeout = 15.0
 
+[file_ingress]
+# Enable private-chat file receipt into per-workspace `.qqfiles/` directories.
+enabled = true
+# Directory created under each chat workspace for incoming QQ files.
+inbox_dirname = ".qqfiles"
+# Timeout (seconds) for downloading private files from NapCat URLs.
+download_timeout = 30.0
+# Buffered file-only or image-only inputs expire after this many seconds.
+pending_ttl_seconds = 1800.0
+# Optional file size cap in MiB. Comment out or leave unset for no limit.
+# max_file_size_mb = 50
+
 [logging]
 # Console output level: DEBUG / INFO / WARNING / ERROR.
 # The log file always captures DEBUG regardless of this setting.

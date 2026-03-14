@@ -69,6 +69,14 @@ uv run python main.py /path/to/your.toml
 - `message` 使用 OneBot 11 segment 数组；`ncat` 当前主要发送 `text` 与 `image` 两类 segment。
 - 在当前本地 NapCat/QQ 环境里，超长文本会让发送接口返回 `retcode=1200`。实测临界点大约在 6.1k 字附近，私聊和群聊都会触发，因此 `ncat` 默认会先按 `max_reply_text_length` 拆分长回复再逐条发送。
 
+## 私聊附件缓冲
+
+- 私聊里的文件-only消息会先落盘到当前 chat workspace 下的 `.qqfiles/`，然后提示用户继续发送说明。
+- 私聊里的图片-only消息也会先缓冲，不会立刻触发 Agent。
+- 只有当用户后续发送第一条带文本的消息时，ncat 才会把累计的文件和图片一起并入这轮 prompt。
+- 文件会通过系统提示文本附加给 Agent，例如 `[SYSTEM: The user attached a file. It has been saved at /workspace/default/.qqfiles/foo.pdf]`。
+- `/new`、NapCat 断开和 pending TTL 过期都会清空尚未消费的附件缓冲。
+
 ## 指令系统
 
 ncat 提供了一套完善的指令系统，你可以直接在 QQ 中向机器人发送以下指令。

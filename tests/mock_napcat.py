@@ -51,6 +51,22 @@ class MockNapCat:
 
     async def send_private_message(self, user_id: int, nickname: str, text: str) -> None:
         """Send a simulated private message event."""
+        await self.send_private_segments(
+            user_id,
+            nickname,
+            [{"type": "text", "data": {"text": text}}],
+            raw_message=text,
+        )
+
+    async def send_private_segments(
+        self,
+        user_id: int,
+        nickname: str,
+        segments: list[dict],
+        *,
+        raw_message: str = "",
+    ) -> None:
+        """Send a private message event with arbitrary OneBot segments."""
         await self._send_event(
             {
                 "self_id": self.BOT_ID,
@@ -64,9 +80,9 @@ class MockNapCat:
                     "nickname": nickname,
                     "card": "",
                 },
-                "message": [{"type": "text", "data": {"text": text}}],
+                "message": segments,
                 "message_format": "array",
-                "raw_message": text,
+                "raw_message": raw_message,
                 "font": 14,
                 "post_type": "message",
             }

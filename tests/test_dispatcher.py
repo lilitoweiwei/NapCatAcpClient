@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -100,6 +101,17 @@ def _group_event(
     }
 
 
+def _private_segments_event(user_id: int, name: str, segments: list[dict]) -> dict:
+    return {
+        "self_id": BOT_ID,
+        "user_id": user_id,
+        "message_type": "private",
+        "sender": {"user_id": user_id, "nickname": name, "card": ""},
+        "message": segments,
+        "post_type": "message",
+    }
+
+
 # --- Basic message routing tests ---
 
 
@@ -133,6 +145,159 @@ async def test_group_with_at_processed(handler_env) -> None:
 
     assert len(mock_agent.calls) == 1
     assert replies.last_text == "Mock AI response"
+
+
+async def test_file_only_message_is_buffered(handler_env, monkeypatch, tmp_path: Path) -> None:
+    handler, mock_agent, replies = handler_env
+    mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
+
+    async def _fake_download_private_file(**kwargs):
+        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox.mkdir(parents=True, exist_ok=True)
+        target = inbox / "foo.pdf"
+        target.write_text("pdf")
+        from ncat.models import SavedFileAttachment
+
+        return SavedFileAttachment(
+            name="foo.pdf",
+            saved_path=str(target),
+            original_file_id="f-1",
+            size=3,
+        )
+
+    monkeypatch.setattr("ncat.dispatcher.best_effort_download_private_file", _fake_download_private_file)
+
+    await handler.handle_message(
+        _private_segments_event(
+            111,
+            "Alice",
+            [
+                {
+                    "type": "file",
+                    "data": {"file": "foo.pdf", "file_id": "f-1", "url": "http://x/foo.pdf"},
+                }
+            ],
+        ),
+        BOT_ID,
+    )
+
+    assert len(mock_agent.calls) == 0
+    assert "已收到文件" in replies.last_text
+    pending = handler._pending_inputs.peek("private:111")
+    assert pending is not None
+    assert len(pending.files) == 1
+
+
+async def test_image_only_message_is_buffered(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(
+        _private_segments_event(
+            111,
+            "Alice",
+            [{"type": "image", "data": {"url": "http://example.com/a.png"}}],
+        ),
+        BOT_ID,
+    )
+
+    assert len(mock_agent.calls) == 0
+    assert replies.last_text == "已收到文件/图片，请继续发送说明。"
+    pending = handler._pending_inputs.peek("private:111")
+    assert pending is not None
+    assert len(pending.images) == 1
+
+
+async def test_next_text_consumes_buffered_files_and_images(handler_env, monkeypatch, tmp_path: Path) -> None:
+    handler, mock_agent, replies = handler_env
+    mock_agent._supports_image = True
+    mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
+
+    async def _fake_download_private_file(**kwargs):
+        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox.mkdir(parents=True, exist_ok=True)
+        target = inbox / "foo.pdf"
+        target.write_text("pdf")
+        from ncat.models import SavedFileAttachment
+
+        return SavedFileAttachment(
+            name="foo.pdf",
+            saved_path=str(target),
+            original_file_id="f-1",
+            size=3,
+        )
+
+    async def _fake_get_file_data(file_id: str):
+        return {"file": str(tmp_path / "unused")}
+
+    async def _fake_download_image(url: str, timeout_seconds: float):
+        assert url == "http://example.com/a.png"
+        assert timeout_seconds > 0
+        return ("aGVsbG8=", "image/png")
+
+    monkeypatch.setattr("ncat.dispatcher.best_effort_download_private_file", _fake_download_private_file)
+    monkeypatch.setattr(handler, "_get_file_data", _fake_get_file_data)
+    monkeypatch.setattr("ncat.prompt_runner.download_image", _fake_download_image)
+
+    await handler.handle_message(
+        _private_segments_event(
+            111,
+            "Alice",
+            [{"type": "file", "data": {"file": "foo.pdf", "file_id": "f-1"}}],
+        ),
+        BOT_ID,
+    )
+    await handler.handle_message(
+        _private_segments_event(
+            111,
+            "Alice",
+            [{"type": "image", "data": {"url": "http://example.com/a.png"}}],
+        ),
+        BOT_ID,
+    )
+    await handler.handle_message(_private_event(111, "Alice", "please check"), BOT_ID)
+
+    assert len(mock_agent.calls) == 1
+    _, prompt = mock_agent.calls[0]
+    assert "please check" in prompt
+    assert prompt.count("[图片]") >= 1
+    assert "[SYSTEM: The user attached a file. It has been saved at" in prompt
+    assert handler._pending_inputs.peek("private:111") is None
+
+
+async def test_new_clears_pending_attachments(handler_env, monkeypatch, tmp_path: Path) -> None:
+    handler, mock_agent, replies = handler_env
+    mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
+
+    async def _fake_download_private_file(**kwargs):
+        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox.mkdir(parents=True, exist_ok=True)
+        target = inbox / "foo.pdf"
+        target.write_text("pdf")
+        from ncat.models import SavedFileAttachment
+
+        return SavedFileAttachment(
+            name="foo.pdf",
+            saved_path=str(target),
+            original_file_id="f-1",
+            size=3,
+        )
+
+    monkeypatch.setattr("ncat.dispatcher.best_effort_download_private_file", _fake_download_private_file)
+
+    await handler.handle_message(
+        _private_segments_event(
+            111,
+            "Alice",
+            [{"type": "file", "data": {"file": "foo.pdf", "file_id": "f-1"}}],
+        ),
+        BOT_ID,
+    )
+    assert handler._pending_inputs.peek("private:111") is not None
+
+    await handler.handle_message(_private_event(111, "Alice", "/new"), BOT_ID)
+
+    assert handler._pending_inputs.peek("private:111") is None
+    assert "新会话" in replies.last_text
 
 
 # --- Command tests ---

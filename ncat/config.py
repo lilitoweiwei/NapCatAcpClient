@@ -92,6 +92,22 @@ class UxConfig:
 
 
 @dataclass
+class FileIngressConfig:
+    """Incoming private-file handling configuration."""
+
+    # Enable private-chat file download and workspace persistence.
+    enabled: bool = True
+    # Directory created under each workspace to store received QQ files.
+    inbox_dirname: str = ".qqfiles"
+    # Timeout (seconds) for downloading files from NapCat-provided URLs.
+    download_timeout: float = 30.0
+    # How long attachment-only messages stay buffered waiting for text.
+    pending_ttl_seconds: float = 1800.0
+    # Optional file size limit in MiB; None disables the limit.
+    max_file_size_mb: int | None = None
+
+
+@dataclass
 class LoggingConfig:
     """Logging configuration."""
 
@@ -115,6 +131,7 @@ class NcatConfig:
     bsp_server: BspServerConfig = field(default_factory=BspServerConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     ux: UxConfig = field(default_factory=UxConfig)
+    file_ingress: FileIngressConfig = field(default_factory=FileIngressConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
@@ -151,6 +168,7 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
     mqtt = MqttConfig(**raw.get("mqtt", {}))
 
     ux = UxConfig(**raw.get("ux", {}))
+    file_ingress = FileIngressConfig(**raw.get("file_ingress", {}))
     logging_cfg = LoggingConfig(**raw.get("logging", {}))
 
     return NcatConfig(
@@ -160,6 +178,7 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
         bsp_server=bsp_server,
         mqtt=mqtt,
         ux=ux,
+        file_ingress=file_ingress,
         logging=logging_cfg,
     )
 

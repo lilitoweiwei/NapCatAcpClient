@@ -14,7 +14,7 @@ from acp.schema import (
 )
 
 from ncat.acp_client import NcatAcpClient
-from ncat.models import VisibleTurnEvent
+from ncat.models import UsageSnapshot, VisibleTurnEvent
 
 pytestmark = pytest.mark.asyncio
 
@@ -37,10 +37,14 @@ def client():
 class RecordingAgentManager:
     def __init__(self) -> None:
         self.visible_events: list[tuple[str, str, VisibleTurnEvent]] = []
+        self.usage_updates: list[tuple[str, UsageSnapshot | None]] = []
 
     def record_visible_event(self, chat_id: str, session_id: str, event: VisibleTurnEvent) -> bool:
         self.visible_events.append((chat_id, session_id, event))
         return True
+
+    def update_usage(self, chat_id: str, usage: UsageSnapshot | None) -> None:
+        self.usage_updates.append((chat_id, usage))
 
 
 async def test_request_permission_prefers_allow_always(client: NcatAcpClient) -> None:
@@ -158,3 +162,28 @@ async def test_request_permission_records_visible_status() -> None:
     )
 
     assert manager.visible_events[0][2].status_text == "<AI 请求权限：Edit file（已自动允许）>"
+
+
+async def test_session_update_records_usage_snapshot() -> None:
+    from acp.schema import Cost, UsageUpdate
+
+    manager = RecordingAgentManager()
+    client = NcatAcpClient(agent_manager=manager, chat_id="test:123")
+
+    await client.session_update(
+        session_id="s1",
+        update=UsageUpdate(
+            sessionUpdate="usage_update",
+            used=120,
+            size=1000,
+            cost=Cost(amount=0.25, currency="USD"),
+        ),
+    )
+
+    assert manager.usage_updates
+    chat_id, usage = manager.usage_updates[0]
+    assert chat_id == "test:123"
+    assert usage is not None
+    assert usage.used == 120
+    assert usage.size == 1000
+    assert usage.cost_amount == 0.25

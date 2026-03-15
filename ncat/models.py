@@ -88,6 +88,39 @@ class VisibleTurnEvent:
 
 
 @dataclass
+class SessionModeInfo:
+    """Known ACP session mode exposed by the agent."""
+
+    id: str
+    name: str
+    description: str = ""
+
+
+@dataclass
+class UsageSnapshot:
+    """Latest per-session usage summary reported by ACP."""
+
+    used: int
+    size: int
+    cost_amount: float | None = None
+    cost_currency: str | None = None
+
+
+@dataclass
+class ChatStatus:
+    """User-facing foreground chat status derived from local ACP state."""
+
+    workspace_name: str
+    workspace_cwd: str
+    connected: bool
+    has_session: bool
+    current_mode_id: str | None = None
+    available_modes: list[SessionModeInfo] = field(default_factory=list)
+    usage: UsageSnapshot | None = None
+    supports_image: bool | None = None
+
+
+@dataclass
 class ParsedMessage:
     """Result of parsing an incoming OneBot message event."""
 

@@ -40,7 +40,7 @@ from acp.schema import (
 )
 
 from ncat.log import debug_event
-from ncat.models import ContentPart, VisibleTurnEvent
+from ncat.models import ContentPart, UsageSnapshot, VisibleTurnEvent
 
 if TYPE_CHECKING:
     from ncat.agent_manager import AgentManager
@@ -173,6 +173,16 @@ class NcatAcpClient(Client):
                 VisibleTurnEvent(
                     key="thinking",
                     status_text="<AI 正在思考中>",
+                ),
+            )
+        elif isinstance(update, UsageUpdate):
+            self._agent_manager.update_usage(
+                self._chat_id,
+                UsageSnapshot(
+                    used=update.used,
+                    size=update.size,
+                    cost_amount=(update.cost.amount if update.cost is not None else None),
+                    cost_currency=(update.cost.currency if update.cost is not None else None),
                 ),
             )
 

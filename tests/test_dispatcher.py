@@ -394,6 +394,8 @@ async def test_command_help(handler_env) -> None:
     handler, _, replies = handler_env
 
     await handler.handle_message(_private_event(111, "A", "/help"), BOT_ID)
+    assert "/agent" in replies.last_text
+    assert "/status" in replies.last_text
     assert "/new" in replies.last_text
     assert "/help" in replies.last_text
     assert "/stop" in replies.last_text
@@ -405,6 +407,84 @@ async def test_command_unknown(handler_env) -> None:
 
     await handler.handle_message(_private_event(111, "A", "/xyz"), BOT_ID)
     assert "/new" in replies.last_text
+
+
+async def test_status_without_session_reports_unknowns(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "/status"), BOT_ID)
+
+    assert len(mock_agent.calls) == 0
+    assert "工作区: default" in replies.last_text
+    assert "连接: 已连接" in replies.last_text
+    assert "会话: 未创建" in replies.last_text
+    assert "未知（首次创建会话后可见）" in replies.last_text
+
+
+async def test_status_after_session_shows_agent_and_usage(handler_env) -> None:
+    from ncat.models import UsageSnapshot
+
+    handler, mock_agent, replies = handler_env
+    mock_agent.usage_by_chat["private:111"] = UsageSnapshot(
+        used=200,
+        size=1000,
+        cost_amount=0.1234,
+        cost_currency="USD",
+    )
+
+    await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
+    await handler.handle_message(_private_event(111, "A", "/status"), BOT_ID)
+
+    assert "会话: 已创建" in replies.last_text
+    assert "Agent: build" in replies.last_text
+    assert "上下文: 200 / 1000 (20.0%)" in replies.last_text
+    assert "累计成本: 0.1234 USD" in replies.last_text
+
+
+async def test_agent_without_name_lists_current_and_available_modes(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
+    await handler.handle_message(_private_event(111, "A", "/agent"), BOT_ID)
+
+    assert "当前 Agent: build" in replies.last_text
+    assert "- reviewer - Review changes" in replies.last_text
+    assert "/new 后会恢复为 OpenCode 默认 agent" in replies.last_text
+
+
+async def test_agent_switches_current_session_mode(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "/agent reviewer"), BOT_ID)
+
+    assert mock_agent.set_mode_calls == [("private:111", "reviewer")]
+    assert mock_agent.new_session_calls == [("private:111", None)]
+    assert replies.last_text.startswith("已切换到 agent：reviewer")
+
+
+async def test_agent_unknown_name_shows_available_modes(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "/agent no-such-agent"), BOT_ID)
+
+    assert "未找到 agent：no-such-agent" in replies.last_text
+    assert "- reviewer - Review changes" in replies.last_text
+
+
+async def test_agent_rejected_while_busy(timeout_env) -> None:
+    handler, mock_agent, replies = timeout_env
+    mock_agent.delay = 5.0
+
+    task = asyncio.create_task(handler.handle_message(_private_event(111, "A", "first"), BOT_ID))
+    await asyncio.sleep(0.05)
+    await handler.handle_message(_private_event(111, "A", "/agent reviewer"), BOT_ID)
+
+    with contextlib.suppress(asyncio.CancelledError):
+        task.cancel()
+        await task
+
+    assert "请等待完成或先发送 /stop" in replies.last_text
+    assert mock_agent.set_mode_calls == []
 
 
 # --- /send forwarding tests ---
@@ -565,12 +645,15 @@ async def test_new_forces_new_session_after_next_message(handler_env) -> None:
 
     await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
     first_session_id = mock_agent.prompt_session_ids[-1][1]
+    await handler.handle_message(_private_event(111, "A", "/agent reviewer"), BOT_ID)
+    assert mock_agent.current_mode_ids["private:111"] == "reviewer"
 
     await handler.handle_message(_private_event(111, "A", "/new alt"), BOT_ID)
     await handler.handle_message(_private_event(111, "A", "hello again"), BOT_ID)
     second_session_id = mock_agent.prompt_session_ids[-1][1]
 
     assert first_session_id != second_session_id
+    assert mock_agent.current_mode_ids["private:111"] == "build"
     assert mock_agent.new_session_calls == [
         ("private:111", None),
         ("private:111", "alt"),

@@ -19,7 +19,7 @@ from ncat.agent_connection import AgentConnection
 from ncat.agent_process import AgentProcess, PromptBlock
 from ncat.config import McpServerConfig
 from ncat.log import info_event, warning_event
-from ncat.models import ContentPart, VisibleTurnEvent
+from ncat.models import ChatStatus, ContentPart, SessionModeInfo, UsageSnapshot, VisibleTurnEvent
 
 logger = logging.getLogger("ncat.agent_manager")
 
@@ -134,6 +134,10 @@ class AgentManager:
         """Return the workspace path currently selected for the chat."""
         return self._get_connection_cwd(chat_id)
 
+    def get_workspace_name(self, chat_id: str) -> str:
+        """Return the workspace-relative name currently selected for the chat."""
+        return self._workspace_name_from_cwd(self.get_workspace_cwd(chat_id))
+
     def _workspace_name_from_cwd(self, cwd: str) -> str:
         """Return the workspace-relative name for a resolved cwd."""
         try:
@@ -200,6 +204,9 @@ class AgentManager:
             conn.visible_turn_event_keys.clear()
             conn.turn_update_count = 0
             conn.active_prompt = False
+            conn.current_mode_id = None
+            conn.available_modes.clear()
+            conn.usage_snapshot = None
             conn.workspace_cwd = self._get_connection_cwd(chat_id)
             workspace_name = self._workspace_name_from_cwd(conn.workspace_cwd)
             _, extra_context = conn.agent_process.build_log_extra_context(
@@ -271,6 +278,9 @@ class AgentManager:
                 conn.active_prompt = False
                 conn.spawn_id = None
                 conn.extra_log_context.clear()
+                conn.current_mode_id = None
+                conn.available_modes.clear()
+                conn.usage_snapshot = None
                 info_event(logger, "agent_disconnect", "Agent disconnected", chat_id=chat_id)
         else:
             # Disconnect all chats
@@ -287,6 +297,9 @@ class AgentManager:
                 conn.active_prompt = False
                 conn.spawn_id = None
                 conn.extra_log_context.clear()
+                conn.current_mode_id = None
+                conn.available_modes.clear()
+                conn.usage_snapshot = None
             self._connections.clear()
             info_event(logger, "agent_disconnect_all", "All agent connections closed")
 
@@ -321,6 +334,62 @@ class AgentManager:
     def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
         """Set cwd for the next session creation only (used by /new [<workspace>])."""
         self._next_session_cwd[chat_id] = self._resolve_workspace_path(dir_or_none)
+
+    def _cache_session_metadata(self, chat_id: str, session) -> None:
+        conn = self._connections.get(chat_id)
+        if conn is None:
+            return
+
+        modes = getattr(session, "modes", None)
+        if modes is None:
+            return
+
+        conn.current_mode_id = getattr(modes, "current_mode_id", None)
+        available = getattr(modes, "available_modes", None) or []
+        conn.available_modes = [
+            SessionModeInfo(
+                id=str(getattr(mode, "id", "")),
+                name=str(getattr(mode, "name", getattr(mode, "id", ""))),
+                description=str(getattr(mode, "description", "") or ""),
+            )
+            for mode in available
+            if getattr(mode, "id", None)
+        ]
+
+    def update_usage(self, chat_id: str, usage: UsageSnapshot | None) -> None:
+        conn = self._connections.get(chat_id)
+        if conn is None:
+            return
+        conn.usage_snapshot = usage
+
+    def get_chat_status(self, chat_id: str) -> ChatStatus:
+        conn = self._connections.get(chat_id)
+        workspace_cwd = self.get_workspace_cwd(chat_id)
+        return ChatStatus(
+            workspace_name=self._workspace_name_from_cwd(workspace_cwd),
+            workspace_cwd=workspace_cwd,
+            connected=conn.is_running if conn else False,
+            has_session=bool(conn and conn.active_session_id),
+            current_mode_id=conn.current_mode_id if conn else None,
+            available_modes=list(conn.available_modes) if conn else [],
+            usage=conn.usage_snapshot if conn else None,
+            supports_image=conn.supports_image if conn else None,
+        )
+
+    async def set_session_mode(self, chat_id: str, mode_id: str) -> None:
+        await self.ensure_connection(chat_id)
+        conn = self._get_or_create_connection(chat_id)
+        acp_conn = conn.agent_process.conn
+        if acp_conn is None:
+            raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
+
+        session_id = await self.get_or_create_session(chat_id)
+        available_ids = [mode.id for mode in conn.available_modes]
+        if available_ids and mode_id not in available_ids:
+            available = ", ".join(available_ids)
+            raise ValueError(f"未找到 agent：{mode_id}。可用 agents: {available}")
+        await acp_conn.set_session_mode(session_id=session_id, mode_id=mode_id)
+        conn.current_mode_id = mode_id
 
     async def _create_session(self, chat_id: str) -> str:
         """Create a new ACP session for the given chat_id."""
@@ -398,6 +467,7 @@ class AgentManager:
             cwd=cwd,
             mcp_servers=mcp_servers_payload,
         )
+        self._cache_session_metadata(chat_id, session)
         session_id = session.session_id
         conn.active_session_id = session_id
         conn.active_turn_session_id = None
@@ -431,6 +501,9 @@ class AgentManager:
             conn.visible_turn_event_keys.clear()
             conn.turn_update_count = 0
             conn.active_prompt = False
+            conn.current_mode_id = None
+            conn.available_modes.clear()
+            conn.usage_snapshot = None
             info_event(logger, "session_close", "Closed session", chat_id=chat_id)
 
     async def close_all_sessions(self) -> None:

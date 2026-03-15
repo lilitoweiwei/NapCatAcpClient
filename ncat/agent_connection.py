@@ -10,7 +10,7 @@ from typing import Any
 
 from ncat.acp_client import NcatAcpClient
 from ncat.agent_process import AgentProcess
-from ncat.models import ContentPart, VisibleTurnEvent
+from ncat.models import ContentPart, SessionModeInfo, UsageSnapshot, VisibleTurnEvent
 
 
 @dataclass
@@ -40,6 +40,9 @@ class AgentConnection:
     workspace_cwd: str | None = None
     spawn_id: str | None = None
     extra_log_context: dict[str, Any] = field(default_factory=dict)
+    current_mode_id: str | None = None
+    available_modes: list[SessionModeInfo] = field(default_factory=list)
+    usage_snapshot: UsageSnapshot | None = None
 
     @property
     def is_running(self) -> bool:

@@ -95,6 +95,7 @@ class MessageDispatcher:
         command_registry.set_dependency("agent_manager", agent_manager)
         command_registry.set_dependency("bsp_client", bsp_client)
         command_registry.set_dependency("cancel_fn", self._ai.cancel)
+        command_registry.set_dependency("busy_fn", self._ai.is_busy)
         command_registry.set_dependency("pending_input_store", self._pending_inputs)
 
         info_event(

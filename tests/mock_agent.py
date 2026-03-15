@@ -13,7 +13,7 @@ from ncat.agent_manager import (
     MSG_AGENT_NOT_CONNECTED,
     AgentErrorWithPartialContent,
 )
-from ncat.models import ContentPart, VisibleTurnEvent
+from ncat.models import ChatStatus, ContentPart, SessionModeInfo, UsageSnapshot, VisibleTurnEvent
 
 
 class MockAgentManager:
@@ -66,6 +66,10 @@ class MockAgentManager:
             list[tuple[list[ContentPart], VisibleTurnEvent]],
         ] = {}
         self.stream_steps: list[tuple[float, list[ContentPart], VisibleTurnEvent]] = []
+        self.current_mode_ids: dict[str, str | None] = {}
+        self.available_modes_by_chat: dict[str, list[SessionModeInfo]] = {}
+        self.usage_by_chat: dict[str, UsageSnapshot] = {}
+        self.set_mode_calls: list[tuple[str, str]] = []
 
     def is_running(self, chat_id: str) -> bool:
         return self._is_running
@@ -109,6 +113,14 @@ class MockAgentManager:
             session_id = f"mock_session_{self._session_counter}_{chat_id}"
             self.session_ids_by_chat[chat_id] = session_id
             self.new_session_calls.append((chat_id, self.next_session_cwds.get(chat_id)))
+            self.current_mode_ids.setdefault(chat_id, "build")
+            self.available_modes_by_chat.setdefault(
+                chat_id,
+                [
+                    SessionModeInfo(id="build", name="build", description="Build things"),
+                    SessionModeInfo(id="reviewer", name="reviewer", description="Review changes"),
+                ],
+            )
         return session_id
 
     def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
@@ -121,9 +133,40 @@ class MockAgentManager:
     async def close_session(self, chat_id: str) -> None:
         self.closed_sessions.add(chat_id)
         self.session_ids_by_chat.pop(chat_id, None)
+        self.current_mode_ids.pop(chat_id, None)
+        self.available_modes_by_chat.pop(chat_id, None)
+        self.usage_by_chat.pop(chat_id, None)
 
     async def close_all_sessions(self) -> None:
         self.all_sessions_closed = True
+
+    def get_chat_status(self, chat_id: str) -> ChatStatus:
+        workspace_cwd = self.get_workspace_cwd(chat_id)
+        return ChatStatus(
+            workspace_name=workspace_cwd.rstrip("/").split("/")[-1],
+            workspace_cwd=workspace_cwd,
+            connected=self._is_running,
+            has_session=chat_id in self.session_ids_by_chat,
+            current_mode_id=self.current_mode_ids.get(chat_id),
+            available_modes=list(self.available_modes_by_chat.get(chat_id, [])),
+            usage=self.usage_by_chat.get(chat_id),
+            supports_image=self._supports_image if chat_id in self.session_ids_by_chat else None,
+        )
+
+    def update_usage(self, chat_id: str, usage: UsageSnapshot | None) -> None:
+        if usage is None:
+            self.usage_by_chat.pop(chat_id, None)
+            return
+        self.usage_by_chat[chat_id] = usage
+
+    async def set_session_mode(self, chat_id: str, mode_id: str) -> None:
+        await self.get_or_create_session(chat_id)
+        available_ids = [mode.id for mode in self.available_modes_by_chat.get(chat_id, [])]
+        if available_ids and mode_id not in available_ids:
+            available = ", ".join(available_ids)
+            raise ValueError(f"未找到 agent：{mode_id}。可用 agents: {available}")
+        self.current_mode_ids[chat_id] = mode_id
+        self.set_mode_calls.append((chat_id, mode_id))
 
     def set_visible_event_notifier(
         self,

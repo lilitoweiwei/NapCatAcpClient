@@ -10,7 +10,7 @@ import pytest
 
 from ncat.agent_manager import AgentManager
 from ncat.agent_process import AgentProcess
-from ncat.models import ContentPart
+from ncat.models import ContentPart, UsageSnapshot
 
 
 class DummyProcess:
@@ -68,12 +68,22 @@ class DummyAcpConnection:
         self.calls: list[tuple[str, list[dict]]] = []
         self.prompt_calls: list[tuple[str, list]] = []
         self.cancel_calls: list[str] = []
+        self.mode_calls: list[tuple[str, str]] = []
         self.session_counter = 0
 
     async def new_session(self, cwd: str, mcp_servers: list[dict]) -> SimpleNamespace:
         self.calls.append((cwd, mcp_servers))
         self.session_counter += 1
-        return SimpleNamespace(session_id=f"sess-{self.session_counter}")
+        return SimpleNamespace(
+            session_id=f"sess-{self.session_counter}",
+            modes=SimpleNamespace(
+                current_mode_id="build",
+                available_modes=[
+                    SimpleNamespace(id="build", name="build", description="Build things"),
+                    SimpleNamespace(id="reviewer", name="reviewer", description="Review changes"),
+                ],
+            ),
+        )
 
     async def prompt(self, session_id: str, prompt: list) -> SimpleNamespace:
         self.prompt_calls.append((session_id, prompt))
@@ -81,6 +91,10 @@ class DummyAcpConnection:
 
     async def cancel(self, session_id: str) -> None:
         self.cancel_calls.append(session_id)
+
+    async def set_session_mode(self, session_id: str, mode_id: str) -> SimpleNamespace:
+        self.mode_calls.append((session_id, mode_id))
+        return SimpleNamespace()
 
 
 class DelayedTrailingUpdateAcpConnection(DummyAcpConnection):
@@ -162,6 +176,8 @@ async def test_create_session_uses_absolute_workspace_path(tmp_path: Path) -> No
     assert conn.workspace_cwd == str(workspace)
     assert acp_conn.calls == [(str(workspace), [])]
     assert conn.active_session_id == "sess-1"
+    assert conn.current_mode_id == "build"
+    assert [mode.id for mode in conn.available_modes] == ["build", "reviewer"]
 
 
 @pytest.mark.asyncio
@@ -264,6 +280,7 @@ async def test_close_session_forces_next_prompt_to_create_new_session(tmp_path: 
     await manager.send_prompt("private:1", [])
 
     assert [session_id for session_id, _ in acp_conn.prompt_calls] == ["sess-1", "sess-2"]
+    assert conn.current_mode_id == "build"
 
 
 @pytest.mark.asyncio
@@ -320,10 +337,44 @@ async def test_disconnect_clears_session_and_turn_state(tmp_path: Path) -> None:
     conn.active_turn_session_id = "sess-1"
     conn.turn_accumulator.append(ContentPart(type="text", text="partial"))
     conn.active_prompt = True
+    conn.current_mode_id = "reviewer"
+    conn.available_modes = []
+    conn.usage_snapshot = UsageSnapshot(used=1, size=10)
 
     await manager.disconnect("private:1")
 
     assert "private:1" not in manager._connections
+
+
+@pytest.mark.asyncio
+async def test_set_session_mode_creates_session_and_updates_current_mode(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+    acp_conn = DummyAcpConnection()
+    conn.agent_process._conn = acp_conn
+    conn.agent_process._process = cast(Any, DummyProcess())
+
+    await manager.set_session_mode("private:1", "reviewer")
+
+    assert acp_conn.calls == [(str(tmp_path / "default"), [])]
+    assert acp_conn.mode_calls == [("sess-1", "reviewer")]
+    assert conn.current_mode_id == "reviewer"
+
+
+def test_get_chat_status_reports_workspace_and_usage(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+    conn.active_session_id = "sess-1"
+    conn.current_mode_id = "reviewer"
+    conn.usage_snapshot = UsageSnapshot(used=50, size=200, cost_amount=1.25, cost_currency="USD")
+
+    status = manager.get_chat_status("private:1")
+
+    assert status.workspace_name == "default"
+    assert status.has_session is True
+    assert status.current_mode_id == "reviewer"
+    assert status.usage is not None
+    assert status.usage.used == 50
 
 
 @pytest.mark.asyncio

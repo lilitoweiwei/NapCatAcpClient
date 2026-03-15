@@ -235,6 +235,11 @@ class PromptRunner:
             # Send reply based on response
             has_text = any(p.type == "text" and p.text for p in response_parts)
             has_image = any(p.type == "image" and p.image_base64 for p in response_parts)
+            turn_had_content = getattr(
+                self._agent_manager,
+                "turn_had_content",
+                lambda cid: False,
+            )(chat_key)
             if has_text or has_image:
                 text_len = sum(len(p.text) for p in response_parts if p.type == "text")
                 info_event(
@@ -246,7 +251,7 @@ class PromptRunner:
                     part_count=len(response_parts),
                 )
                 await self._reply_content_fn(event, response_parts)
-            else:
+            elif not turn_had_content:
                 warning_event(
                     logger,
                     "reply_empty",

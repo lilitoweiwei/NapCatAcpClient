@@ -70,6 +70,7 @@ class MockAgentManager:
         self.available_modes_by_chat: dict[str, list[SessionModeInfo]] = {}
         self.usage_by_chat: dict[str, UsageSnapshot] = {}
         self.set_mode_calls: list[tuple[str, str]] = []
+        self._turn_had_content: dict[str, bool] = {}
 
     def is_running(self, chat_id: str) -> bool:
         return self._is_running
@@ -183,9 +184,13 @@ class MockAgentManager:
 
     def clear_completed_turn_state(self, chat_id: str) -> None:
         self._pending_visible_flushes.pop(chat_id, None)
+        self._turn_had_content.pop(chat_id, None)
 
     def consume_completed_turn_parts(self, chat_id: str) -> list[ContentPart]:
         return self.response_parts or [ContentPart(type="text", text=self.response_text)]
+
+    def turn_had_content(self, chat_id: str) -> bool:
+        return self._turn_had_content.get(chat_id, False)
 
     def queue_visible_flush(
         self,
@@ -229,6 +234,8 @@ class MockAgentManager:
             if delay > 0:
                 await asyncio.sleep(delay)
             streamed_parts.extend(parts)
+            if parts:
+                self._turn_had_content[chat_id] = True
             self.queue_visible_flush(chat_id, parts, visible_event)
             notifier = self._visible_event_notifiers.get(chat_id)
             if notifier is not None:
@@ -236,6 +243,8 @@ class MockAgentManager:
         if self.delay > 0:
             await asyncio.sleep(self.delay)
         if self.response_parts is not None:
+            if self.response_parts:
+                self._turn_had_content[chat_id] = True
             return [*streamed_parts, *self.response_parts]
         return [*streamed_parts, ContentPart(type="text", text=self.response_text)]
 

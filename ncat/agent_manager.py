@@ -117,6 +117,7 @@ class AgentManager:
         conn.visible_turn_events.clear()
         conn.visible_turn_event_keys.clear()
         conn.pending_turn_flushes.clear()
+        conn.turn_had_content = False
         conn.turn_update_count = 0
 
     def _queue_turn_flush(
@@ -609,6 +610,7 @@ class AgentManager:
             and conn.active_turn_session_id == session_id
         ):
             conn.turn_accumulator.append(part)
+            conn.turn_had_content = True
             if part.type == "text" and part.text:
                 self._refresh_pending_text_buffer(conn)
                 if self._drain_text_flushes_from_buffer(conn):
@@ -678,9 +680,6 @@ class AgentManager:
         if conn is None:
             return []
 
-        if conn.turn_accumulator:
-            self._queue_accumulated_parts_flush(conn)
-
         if not conn.pending_turn_flushes:
             conn.visible_turn_events.clear()
             return []
@@ -716,6 +715,10 @@ class AgentManager:
         conn.turn_accumulator.clear()
         conn.pending_text_buffer = ""
         return remaining
+
+    def turn_had_content(self, chat_id: str) -> bool:
+        conn = self._connections.get(chat_id)
+        return bool(conn and conn.turn_had_content)
 
     async def wait_for_turn_settle(
         self,

@@ -1,20 +1,147 @@
 """Integration tests: full pipeline from mock NapCat through ACP agent mock and back."""
 
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
 import websockets
-from acp.schema import ImageContentBlock, TextContentBlock
+from acp.schema import AgentMessageChunk, ImageContentBlock, TextContentBlock
 
 import ncat.prompt_runner as prompt_runner_module
+from ncat.agent_manager import AgentManager
+from ncat.agent_process import AgentProcess
 from ncat.models import ContentPart, VisibleTurnEvent
 from ncat.napcat_server import NcatNapCatServer
 from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio
+
+
+class _FakeStdin:
+    def close(self) -> None:
+        return None
+
+    async def wait_closed(self) -> None:
+        return None
+
+
+class _FakeProcess:
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.pid = 43210
+        self.stdin = _FakeStdin()
+
+    async def wait(self) -> int:
+        if self.returncode is None:
+            self.returncode = 0
+        return self.returncode
+
+
+class _StreamingAcpConnection:
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._session_counter = 0
+        self.prompt_calls: list[tuple[str, list[Any]]] = []
+        self.cancel_calls: list[str] = []
+        self.mode_calls: list[tuple[str, str]] = []
+        self.stream_updates: list[tuple[float, Any]] = []
+
+    async def new_session(self, cwd: str, mcp_servers: list[dict]) -> SimpleNamespace:
+        self._session_counter += 1
+        return SimpleNamespace(
+            session_id=f"stream-{self._session_counter}",
+            modes=SimpleNamespace(current_mode_id="build", available_modes=[]),
+        )
+
+    async def prompt(self, session_id: str, prompt: list[Any]) -> SimpleNamespace:
+        self.prompt_calls.append((session_id, prompt))
+        for delay, update in self.stream_updates:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            await self._client.session_update(session_id=session_id, update=update)
+        return SimpleNamespace(stop_reason="end_turn")
+
+    async def cancel(self, session_id: str) -> None:
+        self.cancel_calls.append(session_id)
+
+    async def set_session_mode(self, session_id: str, mode_id: str) -> SimpleNamespace:
+        self.mode_calls.append((session_id, mode_id))
+        return SimpleNamespace()
+
+    async def close(self) -> None:
+        return None
+
+
+@asynccontextmanager
+async def _real_streaming_stack(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    max_reply_text_length: int,
+    reply_split_start_length: int,
+    stream_updates: list[tuple[float, Any]],
+):
+    connections: list[_StreamingAcpConnection] = []
+
+    async def fake_start_once(
+        self: AgentProcess,
+        client: Any,
+        timeout: float,
+        *,
+        chat_id: str,
+        workspace_name: str,
+        spawn_id: str | None = None,
+    ) -> tuple[str | None, dict[str, Any]]:
+        del timeout
+        conn = _StreamingAcpConnection(client)
+        conn.stream_updates = list(stream_updates)
+        connections.append(conn)
+        self._conn = conn
+        self._process = cast(Any, _FakeProcess())
+        self._supports_image = False
+        return self._log_extra_context_env_var, {
+            "chat_id": chat_id,
+            "workspace_name": workspace_name,
+            "spawn_id": spawn_id or "spawn_test",
+        }
+
+    monkeypatch.setattr(AgentProcess, "start_once", fake_start_once)
+
+    workspace_root = tmp_path / "workspace"
+    agent_manager = AgentManager(
+        command="claude",
+        args=[],
+        workspace_root=str(workspace_root),
+        default_workspace="default",
+        max_reply_text_length=max_reply_text_length,
+        reply_split_start_length=reply_split_start_length,
+    )
+    server = NcatNapCatServer(
+        host="127.0.0.1",
+        port=0,
+        agent_manager=agent_manager,
+        max_reply_text_length=max_reply_text_length,
+        reply_split_start_length=reply_split_start_length,
+    )
+
+    ws_server = await websockets.serve(server._handler_ws, "127.0.0.1", 0)
+    port = ws_server.sockets[0].getsockname()[1]
+    mock = MockNapCat(f"ws://127.0.0.1:{port}")
+    await mock.connect()
+    await asyncio.sleep(0.2)
+
+    try:
+        yield server, mock, connections
+    finally:
+        await mock.close()
+        ws_server.close()
+        await ws_server.wait_closed()
+        await agent_manager.stop()
 
 
 @pytest_asyncio.fixture
@@ -522,6 +649,114 @@ async def test_long_text_reply_stream_flushes_into_multiple_messages(full_stack)
     assert third_call is None
     assert first_call["params"]["message"][0]["data"]["text"] == "abcde"
     assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
+
+
+async def test_real_agent_stream_chunks_flush_on_newline_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Integration test: real ACP chunk callbacks flush on newline split boundaries."""
+    async with _real_streaming_stack(
+        monkeypatch,
+        tmp_path,
+        max_reply_text_length=10,
+        reply_split_start_length=3,
+        stream_updates=[
+            (
+                0,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="ab"),
+                ),
+            ),
+            (
+                0.01,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="cd\n"),
+                ),
+            ),
+            (
+                0.01,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="ef"),
+                ),
+            ),
+            (
+                0.01,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="gh"),
+                ),
+            ),
+        ],
+    ) as (_, mock, _connections):
+        await mock.send_private_message(111, "Alice", "hello")
+
+        first_call = await mock.recv_api_call(timeout=5.0)
+        second_call = await mock.recv_api_call(timeout=5.0)
+        third_call = await mock.recv_api_call(timeout=0.2)
+
+        assert first_call is not None
+        assert second_call is not None
+        assert third_call is None
+        assert first_call["params"]["message"][0]["data"]["text"] == "abcd"
+        assert second_call["params"]["message"][0]["data"]["text"] == "efgh"
+
+
+async def test_real_agent_stream_chunks_flush_on_hard_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Integration test: real ACP chunk callbacks flush on hard length limits."""
+    async with _real_streaming_stack(
+        monkeypatch,
+        tmp_path,
+        max_reply_text_length=5,
+        reply_split_start_length=3,
+        stream_updates=[
+            (
+                0,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="ab"),
+                ),
+            ),
+            (
+                0.01,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="cd"),
+                ),
+            ),
+            (
+                0.01,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="ef"),
+                ),
+            ),
+            (
+                0.01,
+                AgentMessageChunk(
+                    sessionUpdate="agent_message_chunk",
+                    content=TextContentBlock(type="text", text="ghij"),
+                ),
+            ),
+        ],
+    ) as (_, mock, _connections):
+        await mock.send_private_message(111, "Alice", "hello")
+
+        first_call = await mock.recv_api_call(timeout=5.0)
+        second_call = await mock.recv_api_call(timeout=5.0)
+        third_call = await mock.recv_api_call(timeout=0.2)
+
+        assert first_call is not None
+        assert second_call is not None
+        assert third_call is None
+        assert first_call["params"]["message"][0]["data"]["text"] == "abcde"
+        assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
 
 
 async def test_agent_crash_sends_error(full_stack) -> None:

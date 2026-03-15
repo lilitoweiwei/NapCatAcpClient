@@ -37,6 +37,7 @@ class AgentConnection:
     visible_turn_events: list[VisibleTurnEvent] = field(default_factory=list)
     visible_turn_event_keys: set[str] = field(default_factory=set)
     pending_turn_flushes: list[TurnFlush] = field(default_factory=list)
+    turn_had_content: bool = False
     turn_update_count: int = 0
     active_prompt: bool = False
     workspace_cwd: str | None = None

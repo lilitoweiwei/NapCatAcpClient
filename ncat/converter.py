@@ -1,5 +1,7 @@
 """Message conversion between OneBot 11 format and internal representation."""
 
+import re
+
 from ncat.models import ContentPart, FileAttachment, ImageAttachment, ParsedMessage
 
 
@@ -118,23 +120,50 @@ def content_to_onebot(parts: list[ContentPart]) -> list[dict]:
     return segments or [{"type": "text", "data": {"text": ""}}]
 
 
-def split_text_for_onebot(text: str, max_text_length: int) -> list[str]:
-    """Split text into QQ-safe chunks by character count."""
-    if max_text_length <= 0 or not text or len(text) <= max_text_length:
-        return [text]
+_NEWLINE_TOKEN_RE = re.compile(r"\r\n|\r|\n|[^\r\n]+")
 
-    return [text[i : i + max_text_length] for i in range(0, len(text), max_text_length)]
+
+def _normalize_split_start_length(max_text_length: int, split_start_length: int) -> int:
+    if split_start_length <= 0 or split_start_length >= max_text_length:
+        return max_text_length
+    return split_start_length
+
+
+def _append_text_part(batch: list[ContentPart], text: str) -> None:
+    if not text:
+        return
+    if batch and batch[-1].type == "text":
+        batch[-1].text += text
+        return
+    batch.append(ContentPart(type="text", text=text))
+
+
+def split_text_for_onebot(
+    text: str,
+    max_text_length: int,
+    split_start_length: int = 0,
+) -> list[str]:
+    """Split text into QQ-safe chunks, preferring a newline after a soft threshold."""
+    text_batches = split_content_parts_for_onebot(
+        [ContentPart(type="text", text=text)],
+        max_text_length,
+        split_start_length,
+    )
+    return ["".join(part.text for part in batch if part.type == "text") for batch in text_batches]
 
 
 def split_content_parts_for_onebot(
     parts: list[ContentPart],
     max_text_length: int,
+    split_start_length: int = 0,
 ) -> list[list[ContentPart]]:
     """Split ordered content parts into multiple outbound QQ messages."""
     if max_text_length <= 0:
         return [parts]
     if not parts:
         return [[]]
+
+    split_start_length = _normalize_split_start_length(max_text_length, split_start_length)
 
     batches: list[list[ContentPart]] = []
     current_batch: list[ContentPart] = []
@@ -155,27 +184,41 @@ def split_content_parts_for_onebot(
         if part.type != "text" or not part.text:
             continue
 
-        remaining_text = part.text
-        while remaining_text:
-            if current_text_length >= max_text_length:
-                flush()
+        for token_match in _NEWLINE_TOKEN_RE.finditer(part.text):
+            token = token_match.group(0)
 
-            remaining_capacity = max_text_length - current_text_length
-            text_chunk = remaining_text[:remaining_capacity]
-            current_batch.append(ContentPart(type="text", text=text_chunk))
-            current_text_length += len(text_chunk)
-            remaining_text = remaining_text[remaining_capacity:]
-
-            if remaining_text:
+            if token in {"\n", "\r", "\r\n"} and current_text_length > split_start_length:
                 flush()
+                continue
+
+            remaining_text = token
+            while remaining_text:
+                if current_text_length >= max_text_length:
+                    flush()
+
+                remaining_capacity = max_text_length - current_text_length
+                text_chunk = remaining_text[:remaining_capacity]
+                _append_text_part(current_batch, text_chunk)
+                current_text_length += len(text_chunk)
+                remaining_text = remaining_text[remaining_capacity:]
+
+                if remaining_text:
+                    flush()
 
     flush()
     return batches or [parts]
 
 
-def content_to_onebot_batches(parts: list[ContentPart], max_text_length: int) -> list[list[dict]]:
+def content_to_onebot_batches(
+    parts: list[ContentPart],
+    max_text_length: int,
+    split_start_length: int = 0,
+) -> list[list[dict]]:
     """Convert content parts into one or more outbound OneBot message payloads."""
-    return [content_to_onebot(batch) for batch in split_content_parts_for_onebot(parts, max_text_length)]
+    return [
+        content_to_onebot(batch)
+        for batch in split_content_parts_for_onebot(parts, max_text_length, split_start_length)
+    ]
 
 
 def ai_to_onebot(text: str) -> list[dict]:
@@ -187,6 +230,13 @@ def ai_to_onebot(text: str) -> list[dict]:
     return content_to_onebot([ContentPart(type="text", text=text)])
 
 
-def ai_to_onebot_batches(text: str, max_text_length: int) -> list[list[dict]]:
+def ai_to_onebot_batches(
+    text: str,
+    max_text_length: int,
+    split_start_length: int = 0,
+) -> list[list[dict]]:
     """Convert AI text into one or more outbound OneBot message payloads."""
-    return [ai_to_onebot(chunk) for chunk in split_text_for_onebot(text, max_text_length)]
+    return [
+        ai_to_onebot(chunk)
+        for chunk in split_text_for_onebot(text, max_text_length, split_start_length)
+    ]

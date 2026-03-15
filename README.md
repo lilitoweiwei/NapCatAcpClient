@@ -39,7 +39,8 @@ uv run python main.py /path/to/your.toml
 - `log_extra_context_env_var`: 可选环境变量名。若配置，ncat 会在每次拉起 Agent 前，把一个 JSON object 写入该环境变量，供外部 wrapper 记录额外日志上下文。
 
 打开 `[ux]` 块时，另一个常用配置是：
-- `max_reply_text_length`: 单条发往 QQ 的文本长度上限，默认 `5000`。超过后，ncat 会在发送前自动拆成多条消息；设置为 `0` 可关闭预拆分。
+- `max_reply_text_length`: 单条发往 QQ 的文本长度上限，默认 `500`。超过后，ncat 会在发送前自动拆成多条消息；设置为 `0` 可关闭预拆分。
+- `reply_split_start_length`: 优先按换行切分的起始长度，默认 `300`。当累计文本长度超过该值后，ncat 会在遇到的第一个换行处切分，并移除该换行；若迟迟没有换行，仍会在 `max_reply_text_length` 处强制切分。
 
 其他诸如日志目录、UX 体验优化、网络端口等丰富配置，请直接阅读 `config.example.toml` 中的注释，默认配置即可运行。
 
@@ -67,7 +68,7 @@ uv run python main.py /path/to/your.toml
 - `send_private_msg`：向私聊发送消息，常用参数是 `user_id` 与 `message`。
 - `send_group_msg`：向群聊发送消息，常用参数是 `group_id` 与 `message`。
 - `message` 使用 OneBot 11 segment 数组；`ncat` 当前主要发送 `text` 与 `image` 两类 segment。
-- 在当前本地 NapCat/QQ 环境里，超长文本会让发送接口返回 `retcode=1200`。实测临界点大约在 6.1k 字附近，私聊和群聊都会触发，因此 `ncat` 默认会先按 `max_reply_text_length` 拆分长回复再逐条发送。
+- 在当前本地 NapCat/QQ 环境里，超长文本会让发送接口返回 `retcode=1200`。实测临界点大约在 6.1k 字附近，私聊和群聊都会触发，因此 `ncat` 默认会先把单条上限收紧到 `500`，并在超过 `reply_split_start_length` 后优先等待换行再切分；若直到 `max_reply_text_length` 仍没有换行，再做强制切分后逐条发送。
 
 ## 私聊附件缓冲
 

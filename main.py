@@ -90,6 +90,7 @@ async def main() -> None:
         thinking_notify_seconds=config.ux.thinking_notify_seconds,
         thinking_long_notify_seconds=config.ux.thinking_long_notify_seconds,
         max_reply_text_length=config.ux.max_reply_text_length,
+        reply_split_start_length=config.ux.reply_split_start_length,
         image_download_timeout=config.ux.image_download_timeout,
         max_inline_image_mb=config.ux.max_inline_image_mb,
         file_ingress_enabled=config.file_ingress.enabled,

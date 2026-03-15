@@ -8,6 +8,7 @@ from ncat.converter import (
     content_to_onebot,
     content_to_onebot_batches,
     onebot_to_internal,
+    split_text_for_onebot,
 )
 from ncat.models import ContentPart, ParsedMessage, PromptImageAttachment, SavedFileAttachment
 from ncat.prompt_builder import build_context_header, build_prompt_blocks
@@ -214,6 +215,21 @@ def test_ai_to_onebot_batches_split_long_text() -> None:
     ]
 
 
+def test_split_text_for_onebot_prefers_newline_after_threshold() -> None:
+    result = split_text_for_onebot("abcd\nefgh", 10, 3)
+    assert result == ["abcd", "efgh"]
+
+
+def test_split_text_for_onebot_keeps_early_newline_before_threshold() -> None:
+    result = split_text_for_onebot("ab\ncd\nef", 10, 4)
+    assert result == ["ab\ncd", "ef"]
+
+
+def test_split_text_for_onebot_falls_back_to_hard_limit_without_newline() -> None:
+    result = split_text_for_onebot("abcdefghij", 5, 3)
+    assert result == ["abcde", "fghij"]
+
+
 def test_content_to_onebot_text_and_image() -> None:
     parts = [
         ContentPart(type="text", text="hi"),
@@ -241,6 +257,22 @@ def test_content_to_onebot_batches_split_text_and_preserve_order() -> None:
             {"type": "image", "data": {"file": "base64://aGVsbG8="}},
         ],
         [{"type": "text", "data": {"text": "world"}}],
+    ]
+
+
+def test_content_to_onebot_batches_split_on_newline_and_keep_image_order() -> None:
+    parts = [
+        ContentPart(type="text", text="abcd"),
+        ContentPart(type="image", image_base64="aGVsbG8=", image_mime="image/png"),
+        ContentPart(type="text", text="\nefgh"),
+    ]
+    segments = content_to_onebot_batches(parts, 10, 3)
+    assert segments == [
+        [
+            {"type": "text", "data": {"text": "abcd"}},
+            {"type": "image", "data": {"file": "base64://aGVsbG8="}},
+        ],
+        [{"type": "text", "data": {"text": "efgh"}}],
     ]
 
 

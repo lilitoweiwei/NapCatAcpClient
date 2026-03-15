@@ -86,7 +86,10 @@ class UxConfig:
     thinking_long_notify_seconds: float = 30
     # Max text characters per outbound QQ message; replies longer than this are split.
     # Set to 0 to disable pre-splitting.
-    max_reply_text_length: int = 5000
+    max_reply_text_length: int = 500
+    # After accumulated text exceeds this length, split on the next newline when possible.
+    # Set to 0 or >= max_reply_text_length to disable preferred newline splitting.
+    reply_split_start_length: int = 300
     # Timeout (seconds) for downloading images from NapCat-provided URLs
     image_download_timeout: float = 15.0
     # Maximum processed image size in MiB for inline ACP delivery.

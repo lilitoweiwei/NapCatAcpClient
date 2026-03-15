@@ -35,7 +35,8 @@ class NcatNapCatServer:
         agent_manager: AgentManager,
         thinking_notify_seconds: float = 10,
         thinking_long_notify_seconds: float = 30,
-        max_reply_text_length: int = 5000,
+        max_reply_text_length: int = 500,
+        reply_split_start_length: int = 300,
         image_download_timeout: float = 15.0,
         file_ingress_enabled: bool = True,
         file_inbox_dirname: str = ".qqfiles",
@@ -52,6 +53,8 @@ class NcatNapCatServer:
         self._agent_manager = agent_manager
         # Max text characters allowed in a single outbound QQ message.
         self._max_reply_text_length = max_reply_text_length
+        # Preferred minimum accumulated text length before splitting at a newline.
+        self._reply_split_start_length = reply_split_start_length
 
         # Currently active WebSocket connection from NapCatQQ (only one expected)
         self._connection: ServerConnection | None = None
@@ -240,6 +243,7 @@ class NcatNapCatServer:
                 action=action,
                 batch_count=batch_count,
                 max_reply_text_length=self._max_reply_text_length,
+                reply_split_start_length=self._reply_split_start_length,
                 **log_fields,
             )
 
@@ -268,7 +272,11 @@ class NcatNapCatServer:
             chat_id: QQ chat ID in internal format: "private:{user_id}" or "group:{group_id}"
             text: Reply text
         """
-        message_batches = ai_to_onebot_batches(text, self._max_reply_text_length)
+        message_batches = ai_to_onebot_batches(
+            text,
+            self._max_reply_text_length,
+            self._reply_split_start_length,
+        )
         if chat_id.startswith("private:"):
             try:
                 user_id = int(chat_id.split(":", 1)[1])
@@ -312,7 +320,11 @@ class NcatNapCatServer:
     async def _reply_text(self, event: dict, text: str) -> None:
         """Send a text reply back to the source of the message event."""
         message_type = event.get("message_type", "")
-        message_batches = ai_to_onebot_batches(text, self._max_reply_text_length)
+        message_batches = ai_to_onebot_batches(
+            text,
+            self._max_reply_text_length,
+            self._reply_split_start_length,
+        )
 
         # Log the reply text at DEBUG (may be long)
         debug_event(
@@ -343,7 +355,11 @@ class NcatNapCatServer:
     async def _reply_content(self, event: dict, parts: list[ContentPart]) -> None:
         """Send a mixed (text+image) reply back to the source of the message event."""
         message_type = event.get("message_type", "")
-        message_batches = content_to_onebot_batches(parts, self._max_reply_text_length)
+        message_batches = content_to_onebot_batches(
+            parts,
+            self._max_reply_text_length,
+            self._reply_split_start_length,
+        )
 
         text_preview = "".join(p.text for p in parts if p.type == "text")[:300]
         debug_event(

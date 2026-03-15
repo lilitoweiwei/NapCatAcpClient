@@ -110,6 +110,28 @@ async def test_private_message_reply_is_chunked(server_and_mock) -> None:
     assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
 
 
+async def test_private_message_reply_prefers_newline_chunking(server_and_mock) -> None:
+    """Replies should split at the first newline after the soft threshold."""
+    server, mock, mock_agent = server_and_mock
+    await asyncio.sleep(0.1)
+
+    server._max_reply_text_length = 10
+    server._reply_split_start_length = 3
+    mock_agent.response_text = "abcd\nefgh"
+
+    await mock.send_private_message(111, "Alice", "hello")
+
+    first_call = await mock.recv_api_call(timeout=5.0)
+    second_call = await mock.recv_api_call(timeout=5.0)
+    third_call = await mock.recv_api_call(timeout=0.2)
+
+    assert first_call is not None
+    assert second_call is not None
+    assert third_call is None
+    assert first_call["params"]["message"][0]["data"]["text"] == "abcd"
+    assert second_call["params"]["message"][0]["data"]["text"] == "efgh"
+
+
 async def test_group_message_ignored_without_at(server_and_mock) -> None:
     """Test that group messages without @bot are ignored."""
     server, mock, _ = server_and_mock

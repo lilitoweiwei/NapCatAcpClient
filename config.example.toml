@@ -64,7 +64,11 @@ thinking_notify_seconds = 10
 thinking_long_notify_seconds = 30
 # Max text characters per outbound QQ message before ncat splits a long reply.
 # Set to 0 to disable pre-splitting.
-max_reply_text_length = 5000
+max_reply_text_length = 500
+# After accumulated reply text exceeds this length, ncat will prefer to split at
+# the next newline and remove that newline from the outbound messages.
+# Set to 0 or >= max_reply_text_length to disable preferred newline splitting.
+reply_split_start_length = 300
 # Timeout (seconds) for downloading images from NapCat-provided URLs.
 image_download_timeout = 15.0
 # Every image is normalized before being sent to the agent. The processed image

@@ -352,6 +352,28 @@ async def test_long_group_reply_is_chunked(full_stack) -> None:
     assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
 
 
+async def test_group_reply_prefers_newline_chunking(full_stack) -> None:
+    """Integration test: long replies prefer splitting on newlines after the soft threshold."""
+    server, mock, mock_agent = full_stack
+    server._max_reply_text_length = 10
+    server._reply_split_start_length = 3
+    mock_agent.response_parts = [ContentPart(type="text", text="abcd\nefgh")]
+
+    await mock.send_group_message(222, "DevGroup", 333, "Bob", " write a function", at_bot=True)
+
+    first_call = await mock.recv_api_call(timeout=5.0)
+    second_call = await mock.recv_api_call(timeout=5.0)
+    third_call = await mock.recv_api_call(timeout=0.2)
+
+    assert first_call is not None
+    assert second_call is not None
+    assert third_call is None
+    assert first_call["action"] == "send_group_msg"
+    assert second_call["action"] == "send_group_msg"
+    assert first_call["params"]["message"][0]["data"]["text"] == "abcd"
+    assert second_call["params"]["message"][0]["data"]["text"] == "efgh"
+
+
 async def test_new_command_closes_session(full_stack) -> None:
     """Test that /new closes session and next message creates a new one."""
     server, mock, mock_agent = full_stack

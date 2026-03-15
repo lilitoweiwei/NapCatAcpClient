@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 import websockets
 
+from ncat.models import ContentPart
 from ncat.napcat_server import NcatNapCatServer
 from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
@@ -130,6 +131,30 @@ async def test_private_message_reply_prefers_newline_chunking(server_and_mock) -
     assert third_call is None
     assert first_call["params"]["message"][0]["data"]["text"] == "abcd"
     assert second_call["params"]["message"][0]["data"]["text"] == "efgh"
+
+
+async def test_private_stream_reply_flushes_before_completion(server_and_mock) -> None:
+    """Streamed long replies should flush on split boundaries before turn end."""
+    server, mock, mock_agent = server_and_mock
+    await asyncio.sleep(0.1)
+
+    server._max_reply_text_length = 5
+    mock_agent.response_parts = [
+        ContentPart(type="text", text="abcde"),
+        ContentPart(type="text", text="fghij"),
+    ]
+
+    await mock.send_private_message(111, "Alice", "hello")
+
+    first_call = await mock.recv_api_call(timeout=5.0)
+    second_call = await mock.recv_api_call(timeout=5.0)
+    third_call = await mock.recv_api_call(timeout=0.2)
+
+    assert first_call is not None
+    assert second_call is not None
+    assert third_call is None
+    assert first_call["params"]["message"][0]["data"]["text"] == "abcde"
+    assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
 
 
 async def test_group_message_ignored_without_at(server_and_mock) -> None:

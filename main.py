@@ -41,6 +41,8 @@ async def main() -> None:
         args=config.agent.args,
         workspace_root=str(workspace_root),
         default_workspace=config.agent.default_workspace,
+        max_reply_text_length=config.ux.max_reply_text_length,
+        reply_split_start_length=config.ux.reply_split_start_length,
         env=config.agent.env or None,
         log_extra_context_env_var=config.agent.log_extra_context_env_var,
         mcp_servers=config.mcp,

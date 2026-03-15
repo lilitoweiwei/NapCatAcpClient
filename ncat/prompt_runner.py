@@ -20,7 +20,7 @@ from ncat.image_utils import (
     prepare_image_for_inline,
 )
 from ncat.log import error_event, info_event, warning_event
-from ncat.models import ContentPart, DownloadedImage, ParsedMessage, PromptImageAttachment, VisibleTurnEvent
+from ncat.models import ContentPart, DownloadedImage, ParsedMessage, PromptImageAttachment, TurnFlush, VisibleTurnEvent
 from ncat.prompt_builder import build_prompt_blocks
 
 logger = logging.getLogger("ncat.prompt_runner")
@@ -94,9 +94,6 @@ class PromptRunner:
         self._max_inline_image_bytes = max(1, max_inline_image_mb) * 1024 * 1024
         # Active AI processing tasks per chat, keyed by chat_id
         self._active_tasks: dict[str, asyncio.Task[None]] = {}
-        # Number of content parts already flushed to the user for the active turn.
-        self._flushed_part_counts: dict[str, int] = {}
-
     def is_busy(self, chat_id: str) -> bool:
         """Check if there is an active AI task for the given chat."""
         return chat_id in self._active_tasks
@@ -131,7 +128,6 @@ class PromptRunner:
 
         # Register as the active AI task for this chat
         self._active_tasks[chat_key] = current_task
-        self._flushed_part_counts[chat_key] = 0
         self._agent_manager.set_visible_event_notifier(
             chat_key,
             lambda: self._flush_visible_events(chat_key, event),
@@ -234,10 +230,7 @@ class PromptRunner:
                 timer.cancel()
 
             await self._flush_visible_events(chat_key, event)
-
-            flushed_part_count = self._flushed_part_counts.get(chat_key, 0)
-            if flushed_part_count:
-                response_parts = response_parts[flushed_part_count:]
+            response_parts = self._agent_manager.consume_completed_turn_parts(chat_key)
 
             # Send reply based on response
             has_text = any(p.type == "text" and p.text for p in response_parts)
@@ -282,7 +275,7 @@ class PromptRunner:
                 err=str(e.cause),
                 exc_info=True,
             )
-            remaining_partial_parts = e.partial_parts[self._flushed_part_counts.get(chat_key, 0) :]
+            remaining_partial_parts = e.partial_parts
             if remaining_partial_parts:
                 has_text = any(p.type == "text" and p.text for p in remaining_partial_parts)
                 has_image = any(
@@ -363,7 +356,6 @@ class PromptRunner:
 
         finally:
             self._agent_manager.set_visible_event_notifier(chat_key, None)
-            self._flushed_part_counts.pop(chat_key, None)
             self._agent_manager.clear_completed_turn_state(chat_key)
             # Ensure all notification timers are cancelled (idempotent)
             for timer in timers:
@@ -385,17 +377,20 @@ class PromptRunner:
 
     async def _flush_visible_events(self, chat_id: str, event: dict) -> None:
         """Flush buffered content when a visible ACP event boundary arrives."""
-        flushed_part_count = self._flushed_part_counts.get(chat_id, 0)
-        flushes, next_flushed_part_count = self._agent_manager.drain_visible_event_flushes(
-            chat_id,
-            flushed_part_count,
-        )
+        flushes = self._agent_manager.drain_visible_event_flushes(chat_id)
         if not flushes:
             return
 
-        self._flushed_part_counts[chat_id] = next_flushed_part_count
-        for parts, visible_event in flushes:
-            await self._send_visible_event_flush(event, parts, visible_event)
+        for flush in flushes:
+            await self._send_turn_flush(event, flush)
+
+    async def _send_turn_flush(self, event: dict, flush: TurnFlush) -> None:
+        if flush.visible_event is not None:
+            await self._send_visible_event_flush(event, flush.parts, flush.visible_event)
+            return
+
+        if flush.parts:
+            await self._reply_content_fn(event, flush.parts)
 
     async def _send_visible_event_flush(
         self,
@@ -404,6 +399,10 @@ class PromptRunner:
         visible_event: VisibleTurnEvent,
     ) -> None:
         """Send buffered text plus one visible status line as a QQ reply."""
+        if not visible_event.status_text:
+            if parts:
+                await self._reply_content_fn(event, parts)
+            return
         status_part = ContentPart(type="text", text=visible_event.status_text)
         if parts:
             merged_parts = list(parts)

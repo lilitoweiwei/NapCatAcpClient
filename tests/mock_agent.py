@@ -13,7 +13,7 @@ from ncat.agent_manager import (
     MSG_AGENT_NOT_CONNECTED,
     AgentErrorWithPartialContent,
 )
-from ncat.models import ChatStatus, ContentPart, SessionModeInfo, UsageSnapshot, VisibleTurnEvent
+from ncat.models import ChatStatus, ContentPart, SessionModeInfo, TurnFlush, UsageSnapshot, VisibleTurnEvent
 
 
 class MockAgentManager:
@@ -63,7 +63,7 @@ class MockAgentManager:
         self._visible_event_notifiers: dict[str, Callable[[], Awaitable[None]]] = {}
         self._pending_visible_flushes: dict[
             str,
-            list[tuple[list[ContentPart], VisibleTurnEvent]],
+            list[TurnFlush],
         ] = {}
         self.stream_steps: list[tuple[float, list[ContentPart], VisibleTurnEvent]] = []
         self.current_mode_ids: dict[str, str | None] = {}
@@ -178,17 +178,14 @@ class MockAgentManager:
             return
         self._visible_event_notifiers[chat_id] = notifier
 
-    def drain_visible_event_flushes(
-        self,
-        chat_id: str,
-        sent_part_count: int,
-    ) -> tuple[list[tuple[list[ContentPart], VisibleTurnEvent]], int]:
-        flushes = self._pending_visible_flushes.pop(chat_id, [])
-        next_sent = sent_part_count + sum(len(parts) for parts, _ in flushes)
-        return flushes, next_sent
+    def drain_visible_event_flushes(self, chat_id: str) -> list[TurnFlush]:
+        return self._pending_visible_flushes.pop(chat_id, [])
 
     def clear_completed_turn_state(self, chat_id: str) -> None:
         self._pending_visible_flushes.pop(chat_id, None)
+
+    def consume_completed_turn_parts(self, chat_id: str) -> list[ContentPart]:
+        return self.response_parts or [ContentPart(type="text", text=self.response_text)]
 
     def queue_visible_flush(
         self,
@@ -196,7 +193,9 @@ class MockAgentManager:
         parts: list[ContentPart],
         visible_event: VisibleTurnEvent,
     ) -> None:
-        self._pending_visible_flushes.setdefault(chat_id, []).append((parts, visible_event))
+        self._pending_visible_flushes.setdefault(chat_id, []).append(
+            TurnFlush(parts=parts, visible_event=visible_event)
+        )
 
     def accumulate_text(self, session_id: str, text: str) -> None:
         pass

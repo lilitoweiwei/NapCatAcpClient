@@ -16,10 +16,11 @@ from pathlib import Path
 
 from ncat.acp_client import NcatAcpClient
 from ncat.agent_connection import AgentConnection
+from ncat.converter import next_stream_text_flush
 from ncat.agent_process import AgentProcess, PromptBlock
 from ncat.config import McpServerConfig
 from ncat.log import info_event, warning_event
-from ncat.models import ChatStatus, ContentPart, SessionModeInfo, UsageSnapshot, VisibleTurnEvent
+from ncat.models import ChatStatus, ContentPart, SessionModeInfo, TurnFlush, UsageSnapshot, VisibleTurnEvent
 
 logger = logging.getLogger("ncat.agent_manager")
 
@@ -57,6 +58,8 @@ class AgentManager:
         args: list[str],
         workspace_root: str,
         default_workspace: str,
+        max_reply_text_length: int = 500,
+        reply_split_start_length: int = 300,
         env: dict[str, str] | None = None,
         log_extra_context_env_var: str | None = None,
         mcp_servers: list[McpServerConfig] | None = None,
@@ -68,6 +71,8 @@ class AgentManager:
         self._workspace_root = Path(workspace_root).expanduser().resolve()
         self._default_workspace = default_workspace
         self._default_workspace_path = self._resolve_workspace_path(default_workspace)
+        self._max_reply_text_length = max_reply_text_length
+        self._reply_split_start_length = reply_split_start_length
         self._env = env
         self._log_extra_context_env_var = log_extra_context_env_var
         self._initialize_timeout_seconds = initialize_timeout_seconds
@@ -105,6 +110,96 @@ class AgentManager:
             return
 
         self._visible_event_callbacks[chat_id] = notifier
+
+    def _reset_turn_state(self, conn: AgentConnection) -> None:
+        conn.turn_accumulator.clear()
+        conn.pending_text_buffer = ""
+        conn.visible_turn_events.clear()
+        conn.visible_turn_event_keys.clear()
+        conn.pending_turn_flushes.clear()
+        conn.turn_update_count = 0
+
+    def _queue_turn_flush(
+        self,
+        conn: AgentConnection,
+        *,
+        parts: list[ContentPart] | None = None,
+        visible_event: VisibleTurnEvent | None = None,
+    ) -> bool:
+        normalized_parts = [part for part in (parts or []) if not (part.type == "text" and not part.text)]
+        if not normalized_parts and visible_event is None:
+            return False
+        conn.pending_turn_flushes.append(
+            TurnFlush(parts=normalized_parts, visible_event=visible_event)
+        )
+        return True
+
+    def _queue_accumulated_parts_flush(self, conn: AgentConnection) -> bool:
+        if not conn.turn_accumulator:
+            return False
+        queued = self._queue_turn_flush(conn, parts=list(conn.turn_accumulator))
+        conn.turn_accumulator.clear()
+        conn.pending_text_buffer = ""
+        return queued
+
+    def _refresh_pending_text_buffer(self, conn: AgentConnection) -> None:
+        if conn.turn_accumulator and all(part.type == "text" for part in conn.turn_accumulator):
+            conn.pending_text_buffer = "".join(part.text for part in conn.turn_accumulator if part.text)
+            return
+        conn.pending_text_buffer = ""
+
+    def _consume_text_prefix_from_accumulator(self, conn: AgentConnection, text_length: int) -> None:
+        if text_length <= 0:
+            return
+
+        remaining = text_length
+        updated_parts: list[ContentPart] = []
+        for part in conn.turn_accumulator:
+            if remaining <= 0:
+                updated_parts.append(part)
+                continue
+            if part.type != "text":
+                updated_parts.append(part)
+                remaining = 0
+                continue
+            if not part.text:
+                continue
+            if remaining >= len(part.text):
+                remaining -= len(part.text)
+                continue
+            updated_parts.append(ContentPart(type="text", text=part.text[remaining:]))
+            remaining = 0
+
+        conn.turn_accumulator = updated_parts
+        self._refresh_pending_text_buffer(conn)
+
+    def _drain_text_flushes_from_buffer(self, conn: AgentConnection) -> bool:
+        if not conn.pending_text_buffer:
+            return False
+
+        max_length = self._max_reply_text_length
+        if max_length <= 0:
+            return False
+
+        queued = False
+
+        while conn.pending_text_buffer:
+            flush = next_stream_text_flush(
+                conn.pending_text_buffer,
+                max_length,
+                self._reply_split_start_length,
+            )
+            if flush is None:
+                break
+
+            flush_text, consumed_length = flush
+            self._consume_text_prefix_from_accumulator(conn, consumed_length)
+            queued = (
+                self._queue_turn_flush(conn, parts=[ContentPart(type="text", text=flush_text)])
+                or queued
+            )
+
+        return queued
 
     def _resolve_workspace_path(self, workspace: str | None) -> str:
         """Resolve a workspace name to an absolute path under workspace_root."""
@@ -199,10 +294,7 @@ class AgentManager:
 
             conn.active_session_id = None
             conn.active_turn_session_id = None
-            conn.turn_accumulator.clear()
-            conn.visible_turn_events.clear()
-            conn.visible_turn_event_keys.clear()
-            conn.turn_update_count = 0
+            self._reset_turn_state(conn)
             conn.active_prompt = False
             conn.current_mode_id = None
             conn.available_modes.clear()
@@ -271,10 +363,7 @@ class AgentManager:
                 await conn.agent_process.stop()
                 conn.active_session_id = None
                 conn.active_turn_session_id = None
-                conn.turn_accumulator.clear()
-                conn.visible_turn_events.clear()
-                conn.visible_turn_event_keys.clear()
-                conn.turn_update_count = 0
+                self._reset_turn_state(conn)
                 conn.active_prompt = False
                 conn.spawn_id = None
                 conn.extra_log_context.clear()
@@ -290,10 +379,7 @@ class AgentManager:
                 await conn.agent_process.stop()
                 conn.active_session_id = None
                 conn.active_turn_session_id = None
-                conn.turn_accumulator.clear()
-                conn.visible_turn_events.clear()
-                conn.visible_turn_event_keys.clear()
-                conn.turn_update_count = 0
+                self._reset_turn_state(conn)
                 conn.active_prompt = False
                 conn.spawn_id = None
                 conn.extra_log_context.clear()
@@ -471,10 +557,7 @@ class AgentManager:
         session_id = session.session_id
         conn.active_session_id = session_id
         conn.active_turn_session_id = None
-        conn.turn_accumulator.clear()
-        conn.visible_turn_events.clear()
-        conn.visible_turn_event_keys.clear()
-        conn.turn_update_count = 0
+        self._reset_turn_state(conn)
         info_event(
             logger,
             "session_create_ok",
@@ -496,10 +579,7 @@ class AgentManager:
         if conn:
             conn.active_session_id = None
             conn.active_turn_session_id = None
-            conn.turn_accumulator.clear()
-            conn.visible_turn_events.clear()
-            conn.visible_turn_event_keys.clear()
-            conn.turn_update_count = 0
+            self._reset_turn_state(conn)
             conn.active_prompt = False
             conn.current_mode_id = None
             conn.available_modes.clear()
@@ -529,6 +609,13 @@ class AgentManager:
             and conn.active_turn_session_id == session_id
         ):
             conn.turn_accumulator.append(part)
+            if part.type == "text" and part.text:
+                self._refresh_pending_text_buffer(conn)
+                if self._drain_text_flushes_from_buffer(conn):
+                    self._notify_visible_event(chat_id)
+            elif part.type == "image":
+                if self._queue_accumulated_parts_flush(conn):
+                    self._notify_visible_event(chat_id)
             conn.turn_update_count += 1
 
     def record_visible_event(
@@ -547,9 +634,11 @@ class AgentManager:
         ):
             return False
 
-        event.part_count = len(conn.turn_accumulator)
+        self._queue_accumulated_parts_flush(conn)
+        event.part_count = 0
         conn.visible_turn_events.append(event)
         conn.visible_turn_event_keys.add(event.key)
+        self._queue_turn_flush(conn, visible_event=event)
         conn.turn_update_count += 1
         self._notify_visible_event(chat_id)
         return True
@@ -583,25 +672,31 @@ class AgentManager:
         conn.visible_turn_events.clear()
         return events
 
-    def drain_visible_event_flushes(
-        self,
-        chat_id: str,
-        sent_part_count: int,
-    ) -> tuple[list[tuple[list[ContentPart], VisibleTurnEvent]], int]:
+    def drain_visible_event_flushes(self, chat_id: str) -> list[TurnFlush]:
         """Drain pending visible events together with text accumulated before each one."""
         conn = self._connections.get(chat_id)
-        if conn is None or not conn.visible_turn_events:
-            return [], sent_part_count
+        if conn is None:
+            return []
 
-        flushes: list[tuple[list[ContentPart], VisibleTurnEvent]] = []
-        next_sent_part_count = sent_part_count
-        for visible_event in conn.visible_turn_events:
-            parts = list(conn.turn_accumulator[next_sent_part_count : visible_event.part_count])
-            flushes.append((parts, visible_event))
-            next_sent_part_count = visible_event.part_count
+        if conn.turn_accumulator:
+            self._queue_accumulated_parts_flush(conn)
 
+        if not conn.pending_turn_flushes:
+            conn.visible_turn_events.clear()
+            return []
+
+        flushes: list[TurnFlush] = []
+        for pending_flush in conn.pending_turn_flushes:
+            flushes.append(
+                TurnFlush(
+                    parts=list(pending_flush.parts),
+                    visible_event=pending_flush.visible_event,
+                )
+            )
+
+        conn.pending_turn_flushes.clear()
         conn.visible_turn_events.clear()
-        return flushes, next_sent_part_count
+        return flushes
 
     def clear_completed_turn_state(self, chat_id: str) -> None:
         """Clear accumulated turn state after PromptRunner finishes sending outputs."""
@@ -609,9 +704,18 @@ class AgentManager:
         if conn is None:
             return
 
+        self._reset_turn_state(conn)
+
+    def consume_completed_turn_parts(self, chat_id: str) -> list[ContentPart]:
+        """Return unsent parts remaining after any stream-time flushes."""
+        conn = self._connections.get(chat_id)
+        if conn is None:
+            return []
+
+        remaining = list(conn.turn_accumulator)
         conn.turn_accumulator.clear()
-        conn.visible_turn_events.clear()
-        conn.visible_turn_event_keys.clear()
+        conn.pending_text_buffer = ""
+        return remaining
 
     async def wait_for_turn_settle(
         self,
@@ -670,10 +774,7 @@ class AgentManager:
         session_id = await self.get_or_create_session(chat_id)
 
         # Initialize turn-level state
-        conn.turn_accumulator.clear()
-        conn.visible_turn_events.clear()
-        conn.visible_turn_event_keys.clear()
-        conn.turn_update_count = 0
+        self._reset_turn_state(conn)
         conn.active_turn_session_id = session_id
         conn.active_prompt = True
 

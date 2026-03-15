@@ -53,6 +53,8 @@ thinking_long_notify_seconds = 30
 max_reply_text_length = 500
 # After accumulated reply text exceeds this length, ncat will prefer to split at
 # the next newline and remove that newline from the outbound messages.
+# The same boundary also triggers stream-time flushes, so long replies can start
+# reaching QQ before the whole turn completes.
 # Set to 0 or >= max_reply_text_length to disable preferred newline splitting.
 reply_split_start_length = 300
 # Timeout (seconds) for downloading images from NapCat-provided URLs.

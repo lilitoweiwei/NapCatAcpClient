@@ -40,7 +40,7 @@ uv run python main.py /path/to/your.toml
 
 打开 `[ux]` 块时，另一个常用配置是：
 - `max_reply_text_length`: 单条发往 QQ 的文本长度上限，默认 `500`。超过后，ncat 会在发送前自动拆成多条消息；设置为 `0` 可关闭预拆分。
-- `reply_split_start_length`: 优先按换行切分的起始长度，默认 `300`。当累计文本长度超过该值后，ncat 会在遇到的第一个换行处切分，并移除该换行；若迟迟没有换行，仍会在 `max_reply_text_length` 处强制切分。
+- `reply_split_start_length`: 优先按换行切分的起始长度，默认 `300`。当累计文本长度超过该值后，ncat 会在遇到的第一个换行处切分，并移除该换行；若迟迟没有换行，仍会在 `max_reply_text_length` 处强制切分。这个规则现在同时用于最终发包和流式阶段，因此长回复不必等到工具/Thinking 事件才会开始逐段发出。
 
 其他诸如日志目录、UX 体验优化、网络端口等丰富配置，请直接阅读 `config.example.toml` 中的注释，默认配置即可运行。
 
@@ -151,6 +151,7 @@ graph TD
 - 如果用户发送 `/agent <name>`，ncat 会对当前 foreground ACP session 调用 `setSessionMode` 切换 agent；这个选择只在当前 session 内有效。
 - 某些 Agent 会在 `session/prompt` 返回后继续送达少量尾部 `session/update` 分片；ncat 会在转发到 QQ 前短暂等待这些尾部流式分片，避免长回复被截断。
 - 当前前台会话会根据部分 ACP 事件边界提前向 QQ 发送中间状态，而不是始终等到整轮结束后再一次性回复。当前会展示的状态主要包括思考中、规划中、工具调用中、以及权限请求已自动允许等提示。
+- 除了这些可见事件外，纯文本流本身也会在命中 `reply_split_start_length`/`max_reply_text_length` 的切分边界时提前 flush，提升长回复场景下的首段可见时间。
 - ncat 还会缓存当前 session 已知的 agent 列表与最近 usage 摘要，供 `/agent` 和 `/status` 查询使用。
 - `/stop` 只会对当前 prompt turn 发送 `session/cancel`，不会结束会话，也不会重启 Agent 进程。
 - `/new` 会丢弃当前 session、本地清空上下文，并停止该 chat 对应的 Agent 子进程；下一条普通消息才会重新启动新的 Agent 并创建新的 session，同时 agent 恢复为 OpenCode 默认值。

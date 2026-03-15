@@ -152,6 +152,29 @@ def split_text_for_onebot(
     return ["".join(part.text for part in batch if part.type == "text") for batch in text_batches]
 
 
+def next_stream_text_flush(
+    text: str,
+    max_text_length: int,
+    split_start_length: int = 0,
+) -> tuple[str, int] | None:
+    """Return the next stream-time flush chunk and consumed input length."""
+    if not text or max_text_length <= 0:
+        return None
+
+    split_start_length = _normalize_split_start_length(max_text_length, split_start_length)
+
+    if len(text) > split_start_length:
+        for token_match in _NEWLINE_TOKEN_RE.finditer(text):
+            token = token_match.group(0)
+            if token in {"\n", "\r", "\r\n"} and token_match.start() > split_start_length:
+                return text[: token_match.start()], token_match.end()
+
+    if len(text) >= max_text_length:
+        return text[:max_text_length], max_text_length
+
+    return None
+
+
 def split_content_parts_for_onebot(
     parts: list[ContentPart],
     max_text_length: int,

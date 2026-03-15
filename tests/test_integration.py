@@ -502,6 +502,28 @@ async def test_long_text_reply_is_not_truncated(full_stack) -> None:
     assert sent_text == long_text
 
 
+async def test_long_text_reply_stream_flushes_into_multiple_messages(full_stack) -> None:
+    """Integration test: long streamed text flushes before prompt completion."""
+    server, mock, mock_agent = full_stack
+    server._max_reply_text_length = 5
+    mock_agent.response_parts = [
+        ContentPart(type="text", text="abcde"),
+        ContentPart(type="text", text="fghij"),
+    ]
+
+    await mock.send_private_message(111, "Alice", "repeat back a long string")
+
+    first_call = await mock.recv_api_call(timeout=5.0)
+    second_call = await mock.recv_api_call(timeout=5.0)
+    third_call = await mock.recv_api_call(timeout=0.2)
+
+    assert first_call is not None
+    assert second_call is not None
+    assert third_call is None
+    assert first_call["params"]["message"][0]["data"]["text"] == "abcde"
+    assert second_call["params"]["message"][0]["data"]["text"] == "fghij"
+
+
 async def test_agent_crash_sends_error(full_stack) -> None:
     """Test that agent crash sends user-friendly error message."""
     server, mock, mock_agent = full_stack

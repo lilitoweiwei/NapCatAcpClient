@@ -88,6 +88,14 @@ class VisibleTurnEvent:
 
 
 @dataclass
+class TurnFlush:
+    """A pending outbound flush generated during the active turn."""
+
+    parts: list[ContentPart] = field(default_factory=list)
+    visible_event: VisibleTurnEvent | None = None
+
+
+@dataclass
 class SessionModeInfo:
     """Known ACP session mode exposed by the agent."""
 

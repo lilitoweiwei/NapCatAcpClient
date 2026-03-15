@@ -7,6 +7,7 @@ from ncat.converter import (
     ai_to_onebot_batches,
     content_to_onebot,
     content_to_onebot_batches,
+    next_stream_text_flush,
     onebot_to_internal,
     split_text_for_onebot,
 )
@@ -228,6 +229,18 @@ def test_split_text_for_onebot_keeps_early_newline_before_threshold() -> None:
 def test_split_text_for_onebot_falls_back_to_hard_limit_without_newline() -> None:
     result = split_text_for_onebot("abcdefghij", 5, 3)
     assert result == ["abcde", "fghij"]
+
+
+def test_next_stream_text_flush_prefers_newline_after_threshold() -> None:
+    assert next_stream_text_flush("abcd\nefgh", 10, 3) == ("abcd", 5)
+
+
+def test_next_stream_text_flush_uses_hard_limit_without_newline() -> None:
+    assert next_stream_text_flush("abcdefghij", 5, 3) == ("abcde", 5)
+
+
+def test_next_stream_text_flush_waits_when_under_threshold() -> None:
+    assert next_stream_text_flush("abc\ndef", 10, 8) is None
 
 
 def test_content_to_onebot_text_and_image() -> None:

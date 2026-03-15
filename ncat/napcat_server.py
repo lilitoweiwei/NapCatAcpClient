@@ -44,7 +44,6 @@ class NcatNapCatServer:
         pending_ttl_seconds: float = 1800.0,
         max_file_size_mb: int | None = None,
         max_inline_image_mb: int = 2,
-        bsp_client=None,
     ) -> None:
         # WebSocket bind address and port
         self._host = host
@@ -80,7 +79,6 @@ class NcatNapCatServer:
             max_file_size_mb=max_file_size_mb,
             max_inline_image_mb=max_inline_image_mb,
             get_file_fn=self._get_file_via_api,
-            bsp_client=bsp_client,
         )
 
     async def start(self) -> None:
@@ -265,8 +263,8 @@ class NcatNapCatServer:
     async def send_qq_reply(self, chat_id: str, text: str) -> None:
         """Send a QQ reply to the specified chat ID.
 
-        This is a wrapper for MQTT notifications to send replies without
-        needing the original event dict.
+        This is a convenience wrapper for sending replies without needing the
+        original event dict.
 
         Args:
             chat_id: QQ chat ID in internal format: "private:{user_id}" or "group:{group_id}"
@@ -290,7 +288,7 @@ class NcatNapCatServer:
                 warning_event(
                     logger,
                     "reply_send_invalid_chat",
-                    "Invalid private chat_id for MQTT notification",
+                    "Invalid private chat_id",
                     chat_id=chat_id,
                 )
         elif chat_id.startswith("group:"):
@@ -306,14 +304,14 @@ class NcatNapCatServer:
                 warning_event(
                     logger,
                     "reply_send_invalid_chat",
-                    "Invalid group chat_id for MQTT notification",
+                    "Invalid group chat_id",
                     chat_id=chat_id,
                 )
         else:
             warning_event(
                 logger,
                 "reply_send_invalid_chat",
-                "Invalid chat_id for MQTT notification",
+                "Invalid chat_id",
                 chat_id=chat_id,
             )
 

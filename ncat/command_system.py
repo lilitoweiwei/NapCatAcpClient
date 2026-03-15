@@ -136,7 +136,7 @@ class CommandRegistry:
         """Try to execute a command from text.
 
         Args:
-            text: Message text to parse (e.g., "/bg new test prompt")
+            text: Message text to parse (e.g., "/new demo")
             **context: Context variables to pass to handlers (chat_id, reply_fn, event, etc.)
 
         Returns:

@@ -57,26 +57,6 @@ class McpServerConfig:
 
 
 @dataclass
-class BspServerConfig:
-    """BSP (Background Session Protocol) server configuration."""
-
-    enabled: bool = True
-    host: str = "127.0.0.1"
-    port: int = 8766
-
-
-@dataclass
-class MqttConfig:
-    """MQTT broker configuration for subscribing to session notifications."""
-
-    enabled: bool = True
-    host: str = "suzu-mosquitto"
-    port: int = 1883
-    topic_prefix: str = "suzu"
-    client_id: str = "ncat"
-
-
-@dataclass
 class UxConfig:
     """User experience configuration for timeout notifications and interaction."""
 
@@ -133,8 +113,6 @@ class NcatConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     mcp: list[McpServerConfig] = field(default_factory=list)
-    bsp_server: BspServerConfig = field(default_factory=BspServerConfig)
-    mqtt: MqttConfig = field(default_factory=MqttConfig)
     ux: UxConfig = field(default_factory=UxConfig)
     file_ingress: FileIngressConfig = field(default_factory=FileIngressConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -169,9 +147,6 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
     mcp_raw = raw.get("mcp", [])
     mcp = [McpServerConfig(**item) for item in mcp_raw]
 
-    bsp_server = BspServerConfig(**raw.get("bsp_server", {}))
-    mqtt = MqttConfig(**raw.get("mqtt", {}))
-
     ux = UxConfig(**raw.get("ux", {}))
     file_ingress = FileIngressConfig(**raw.get("file_ingress", {}))
     logging_cfg = LoggingConfig(**raw.get("logging", {}))
@@ -180,8 +155,6 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
         server=server,
         agent=agent,
         mcp=mcp,
-        bsp_server=bsp_server,
-        mqtt=mqtt,
         ux=ux,
         file_ingress=file_ingress,
         logging=logging_cfg,

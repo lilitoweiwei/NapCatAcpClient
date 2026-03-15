@@ -9,11 +9,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 
-# Import bg_command to register /bg * commands (must be after command_registry is created)
-# This module has side effects: registers commands in command_registry
-from ncat import bg_command  # noqa: F401
 from ncat.agent_manager import AgentManager
-from ncat.bsp_client import BspClient
 from ncat.command import command_registry, get_help_text
 from ncat.converter import onebot_to_internal
 from ncat.file_ingress import best_effort_download_private_file
@@ -60,14 +56,11 @@ class MessageDispatcher:
         max_file_size_mb: int | None = None,
         max_inline_image_mb: int = 2,
         get_file_fn: Callable[[str], Awaitable[dict | None]] | None = None,
-        bsp_client: BspClient | None = None,
     ) -> None:
         # Callback to send a text reply back to the QQ message source
         self._reply_fn = reply_fn
         # Agent manager
         self._agent_manager = agent_manager
-        # BSP client for background session management
-        self._bsp_client = bsp_client
         self._file_ingress_enabled = file_ingress_enabled
         self._file_inbox_dirname = file_inbox_dirname
         self._file_download_timeout = file_download_timeout
@@ -93,7 +86,6 @@ class MessageDispatcher:
 
         # Configure command registry with dependencies
         command_registry.set_dependency("agent_manager", agent_manager)
-        command_registry.set_dependency("bsp_client", bsp_client)
         command_registry.set_dependency("cancel_fn", self._ai.cancel)
         command_registry.set_dependency("busy_fn", self._ai.is_busy)
         command_registry.set_dependency("pending_input_store", self._pending_inputs)

@@ -5,10 +5,8 @@ import logging
 from pathlib import Path
 
 from ncat.agent_manager import AgentManager
-from ncat.bsp_client import BspClient
 from ncat.config import get_config_path, load_config
 from ncat.log import info_event, setup_logging
-from ncat.mqtt_subscriber import MqttSubscriber
 from ncat.napcat_server import NcatNapCatServer
 
 logger = logging.getLogger("ncat.main")
@@ -36,31 +34,6 @@ async def main() -> None:
         workspace_root=str(workspace_root),
         default_workspace=str(default_workspace),
     )
-
-    # Initialize BSP client for background session management
-    bsp_client = None
-    if config.bsp_server.enabled:
-        base_url = f"http://{config.bsp_server.host}:{config.bsp_server.port}"
-        bsp_client = BspClient(base_url)
-        info_event(logger, "bsp_client_ready", "BSP client initialized", base_url=base_url)
-
-    # Initialize MQTT subscriber for session notifications
-    mqtt_subscriber = None
-    if config.mqtt.enabled and bsp_client:
-        mqtt_subscriber = MqttSubscriber(
-            host=config.mqtt.host,
-            port=config.mqtt.port,
-            topic_prefix=config.mqtt.topic_prefix,
-            client_id=config.mqtt.client_id,
-        )
-        info_event(
-            logger,
-            "mqtt_configured",
-            "MQTT subscriber configured",
-            host=config.mqtt.host,
-            port=config.mqtt.port,
-            client_id=config.mqtt.client_id,
-        )
 
     # Initialize agent manager (no connection at startup; connect on first user message)
     agent_manager = AgentManager(
@@ -98,23 +71,12 @@ async def main() -> None:
         file_download_timeout=config.file_ingress.download_timeout,
         pending_ttl_seconds=config.file_ingress.pending_ttl_seconds,
         max_file_size_mb=config.file_ingress.max_file_size_mb,
-        bsp_client=bsp_client,
     )
 
     try:
-        # Start MQTT subscriber if enabled
-        if mqtt_subscriber:
-            # Set reply function for MQTT notifications
-            mqtt_subscriber.set_reply_fn(server.send_qq_reply)
-            await mqtt_subscriber.start()
-
         await server.start()
     finally:
         # Cleanup resources
-        if mqtt_subscriber:
-            await mqtt_subscriber.stop()
-        if bsp_client:
-            await bsp_client.close()
         await agent_manager.stop()
         info_event(logger, "service_stop", "ncat shut down")
 

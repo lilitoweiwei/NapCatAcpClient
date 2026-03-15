@@ -1,6 +1,6 @@
 """User command handling with unified command system.
 
-All commands (/new, /stop, /bg *, etc.) are registered in a central registry
+All commands (/new, /stop, /agent, etc.) are registered in a central registry
 with regex patterns and handler functions. Help text is automatically generated.
 """
 

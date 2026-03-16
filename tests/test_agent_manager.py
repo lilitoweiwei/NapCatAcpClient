@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import pytest
 
-from ncat.agent_manager import AgentManager
+from ncat.agent_manager import AcpMessageTooLargeError, AgentErrorWithPartialContent, AgentManager
 from ncat.agent_process import AgentProcess
 from ncat.models import ContentPart, UsageSnapshot
 
@@ -142,6 +142,29 @@ def _manager(tmp_path: Path) -> AgentManager:
     )
 
 
+class OversizedMessageAcpConnection(DummyAcpConnection):
+    async def prompt(self, session_id: str, prompt: list) -> SimpleNamespace:
+        self.prompt_calls.append((session_id, prompt))
+        raise asyncio.LimitOverrunError(
+            "Separator is not found, and chunk exceed the limit",
+            consumed=1024,
+        )
+
+
+def test_connection_uses_configured_acp_stdio_limit(tmp_path: Path) -> None:
+    manager = AgentManager(
+        command="claude",
+        args=[],
+        workspace_root=str(tmp_path),
+        default_workspace="default",
+        acp_stdio_read_limit_mb=256,
+    )
+
+    conn = manager._get_or_create_connection("private:1")
+
+    assert conn.agent_process.stdio_read_limit_bytes == 256 * 1024 * 1024
+
+
 def test_set_next_session_cwd_uses_default_workspace(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
 
@@ -265,6 +288,24 @@ async def test_successful_prompt_keeps_active_session(tmp_path: Path) -> None:
     assert conn.active_turn_session_id is None
     assert conn.turn_accumulator == []
     assert conn.active_prompt is False
+
+
+@pytest.mark.asyncio
+async def test_send_prompt_translates_oversized_acp_message_and_disconnects(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+    acp_conn = OversizedMessageAcpConnection()
+    conn.agent_process._conn = acp_conn
+    conn.agent_process._process = cast(Any, DummyProcess())
+
+    with pytest.raises(AgentErrorWithPartialContent) as excinfo:
+        await manager.send_prompt("private:1", [])
+
+    cause = excinfo.value.cause
+    assert isinstance(cause, AcpMessageTooLargeError)
+    assert "128MB" in str(cause)
+    assert "acp_stdio_read_limit_mb" in str(cause)
+    assert "private:1" not in manager._connections
 
 
 @pytest.mark.asyncio

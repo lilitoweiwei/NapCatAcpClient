@@ -48,6 +48,7 @@ async def main() -> None:
         mcp_servers=config.mcp,
         initialize_timeout_seconds=config.agent.initialize_timeout_seconds,
         retry_interval_seconds=config.agent.retry_interval_seconds,
+        acp_stdio_read_limit_mb=config.agent.acp_stdio_read_limit_mb,
     )
     info_event(
         logger,

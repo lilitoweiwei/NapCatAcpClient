@@ -40,6 +40,26 @@ class AgentErrorWithPartialContent(Exception):
         self.partial_parts = partial_parts
 
 
+class AcpMessageTooLargeError(RuntimeError):
+    """Raised when one ACP JSONL message exceeds ncat's configured read limit."""
+
+    def __init__(self, limit_mb: int) -> None:
+        self.limit_mb = limit_mb
+        super().__init__(
+            "Agent 返回的单条 ACP 消息超过 ncat 读取上限"
+            f"（{limit_mb}MB）。如需处理更大的消息，请调高 [agent].acp_stdio_read_limit_mb。"
+        )
+
+
+def _is_acp_message_too_large_error(exc: BaseException) -> bool:
+    if isinstance(exc, asyncio.LimitOverrunError):
+        return True
+    if isinstance(exc, ValueError):
+        msg = str(exc)
+        return "chunk is longer than limit" in msg or "chunk exceed the limit" in msg
+    return False
+
+
 class AgentManager:
     """Orchestrates multiple ACP connections, prompt sending, and content accumulation.
 
@@ -65,6 +85,7 @@ class AgentManager:
         mcp_servers: list[McpServerConfig] | None = None,
         initialize_timeout_seconds: float = 30.0,
         retry_interval_seconds: float = 10.0,
+        acp_stdio_read_limit_mb: int = 128,
     ) -> None:
         self._command = command
         self._args = args
@@ -77,6 +98,10 @@ class AgentManager:
         self._log_extra_context_env_var = log_extra_context_env_var
         self._initialize_timeout_seconds = initialize_timeout_seconds
         self._retry_interval_seconds = retry_interval_seconds
+        if acp_stdio_read_limit_mb <= 0:
+            raise ValueError("acp_stdio_read_limit_mb must be greater than 0")
+        self._acp_stdio_read_limit_mb = acp_stdio_read_limit_mb
+        self._acp_stdio_read_limit_bytes = acp_stdio_read_limit_mb * 1024 * 1024
         self._mcp_servers = mcp_servers or []
 
         # Multi-connection management: chat_id -> AgentConnection
@@ -255,6 +280,7 @@ class AgentManager:
                 cwd=workspace_cwd,
                 env=self._env,
                 log_extra_context_env_var=self._log_extra_context_env_var,
+                stdio_read_limit_bytes=self._acp_stdio_read_limit_bytes,
             )
             acp_client = NcatAcpClient(agent_manager=self, chat_id=chat_id)
             connection = AgentConnection(
@@ -812,9 +838,23 @@ class AgentManager:
             raise
 
         except Exception as e:
-            # Propagate partial content so the user can see what was already streamed
             partial_parts = list(conn.turn_accumulator)
-            raise AgentErrorWithPartialContent(e, partial_parts) from e
+            normalized_error: BaseException = e
+            if _is_acp_message_too_large_error(e):
+                normalized_error = AcpMessageTooLargeError(self._acp_stdio_read_limit_mb)
+                warning_event(
+                    logger,
+                    "prompt_acp_message_too_large",
+                    "ACP message exceeded configured stdio read limit",
+                    chat_id=chat_id,
+                    session_id=session_id,
+                    limit_mb=self._acp_stdio_read_limit_mb,
+                    limit_bytes=self._acp_stdio_read_limit_bytes,
+                    err=str(e),
+                )
+                await self.disconnect(chat_id)
+            # Propagate partial content so the user can see what was already streamed
+            raise AgentErrorWithPartialContent(normalized_error, partial_parts) from e
 
         finally:
             conn.turn_update_count = 0

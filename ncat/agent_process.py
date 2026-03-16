@@ -103,6 +103,7 @@ class AgentProcess:
         cwd: str,
         env: dict[str, str] | None = None,
         log_extra_context_env_var: str | None = None,
+        stdio_read_limit_bytes: int = 128 * 1024 * 1024,
     ) -> None:
         # Agent executable and arguments
         self._command = command
@@ -112,6 +113,7 @@ class AgentProcess:
         # Extra environment variables (merged with system env at start time)
         self._extra_env = env or {}
         self._log_extra_context_env_var = log_extra_context_env_var
+        self._stdio_read_limit_bytes = stdio_read_limit_bytes
 
         # Agent subprocess handle
         self._process: aio_subprocess.Process | None = None
@@ -155,6 +157,11 @@ class AgentProcess:
     def log_extra_context_env_var(self) -> str | None:
         """Configured env var name used to pass wrapper log context."""
         return self._log_extra_context_env_var
+
+    @property
+    def stdio_read_limit_bytes(self) -> int:
+        """Maximum bytes allowed for one ACP stdio line read."""
+        return self._stdio_read_limit_bytes
 
     def build_log_extra_context(
         self,
@@ -201,6 +208,7 @@ class AgentProcess:
             cmd_args=self._args,
             cwd=self._cwd,
             chat_id=chat_id,
+            stdio_read_limit_bytes=self._stdio_read_limit_bytes,
         )
 
         proc_env: dict[str, str] | None = None
@@ -253,6 +261,7 @@ class AgentProcess:
                 stdout=aio_subprocess.PIPE,
                 cwd=self._cwd,
                 env=proc_env,
+                limit=self._stdio_read_limit_bytes,
                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
         else:
@@ -263,6 +272,7 @@ class AgentProcess:
                 stdout=aio_subprocess.PIPE,
                 cwd=self._cwd,
                 env=proc_env,
+                limit=self._stdio_read_limit_bytes,
                 start_new_session=True,
             )
 

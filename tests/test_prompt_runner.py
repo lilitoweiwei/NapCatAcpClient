@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 import ncat.prompt_runner as prompt_runner_module
+from ncat.agent_manager import AcpMessageTooLargeError
 from ncat.models import ContentPart, DownloadedImage, ImageAttachment, ParsedMessage, VisibleTurnEvent
 from ncat.prompt_runner import PromptRunner
 from tests.mock_agent import MockAgentManager
@@ -191,6 +192,25 @@ async def test_process_error_with_empty_partial_sends_only_error() -> None:
     assert "Agent 异常" in replies.texts[0]
     assert "Stream failed" in replies.texts[0]
     assert "private:111" in agent.closed_sessions
+
+
+async def test_process_oversized_acp_message_uses_friendly_error() -> None:
+    agent = MockAgentManager()
+    agent.raise_error_with_parts = (AcpMessageTooLargeError(128), [])
+    replies = ReplyQueue()
+    runner = PromptRunner(
+        agent_manager=agent,
+        reply_fn=replies,
+        thinking_notify_seconds=0,
+        thinking_long_notify_seconds=0,
+    )
+
+    await runner.process(_parsed_private("private:111", 111, "Alice", "x"), event={})
+
+    assert len(replies.texts) == 1
+    assert "128MB" in replies.texts[0]
+    assert "acp_stdio_read_limit_mb" in replies.texts[0]
+    assert "Separator is not found" not in replies.texts[0]
 
 
 async def test_is_busy_true_while_processing() -> None:

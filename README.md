@@ -36,6 +36,7 @@ uv run python main.py /path/to/your.toml
 - `args`: 传递给 Agent 的启动参数（例如 `["--experimental-acp"]`）。
 - `workspace_root`: 工作区根目录（默认 `"/workspace"`）。
 - `default_workspace`: 默认工作区名；当用户发送 `/new` 而不带参数时，会使用 `workspace_root/default_workspace`。
+- `acp_stdio_read_limit_mb`: ncat 从 Agent 的 ACP 标准输出中读取单条 JSON 消息时的大小上限，默认 `128`。当 Agent 会返回很大的工具输入/输出时，可以调大这个值。
 - `log_extra_context_env_var`: 可选环境变量名。若配置，ncat 会在每次拉起 Agent 前，把一个 JSON object 写入该环境变量，供外部 wrapper 记录额外日志上下文。
 
 打开 `[ux]` 块时，另一个常用配置是：

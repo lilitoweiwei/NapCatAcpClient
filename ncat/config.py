@@ -36,6 +36,8 @@ class AgentConfig:
     initialize_timeout_seconds: float = 30.0
     # Fixed interval in seconds between connection attempts (no backoff)
     retry_interval_seconds: float = 10.0
+    # Maximum size in MiB for a single ACP stdio message line read from the agent.
+    acp_stdio_read_limit_mb: int = 128
 
 
 @dataclass
@@ -143,6 +145,8 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
     agent_raw.setdefault("initialize_timeout_seconds", 300.0)
     agent_raw.setdefault("retry_interval_seconds", 10.0)
     agent = AgentConfig(**agent_raw)
+    if agent.acp_stdio_read_limit_mb <= 0:
+        raise ValueError("[agent].acp_stdio_read_limit_mb must be greater than 0")
 
     mcp_raw = raw.get("mcp", [])
     mcp = [McpServerConfig(**item) for item in mcp_raw]

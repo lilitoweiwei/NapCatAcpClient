@@ -16,6 +16,9 @@ args = []
 workspace_root = "/workspace"
 # Default workspace name used when /new is sent without an argument.
 default_workspace = "default"
+# Maximum size in MiB for one ACP stdio JSON line read from the agent.
+# Increase this if the agent returns very large tool inputs/outputs in a single event.
+acp_stdio_read_limit_mb = 128
 # Optional env var name used to pass a JSON object with extra log context
 # to the agent wrapper. ncat only emits the JSON object and does not define
 # how the wrapper stores it.

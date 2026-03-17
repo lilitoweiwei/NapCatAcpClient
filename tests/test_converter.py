@@ -356,7 +356,7 @@ def test_build_context_header_appends_single_file_hint() -> None:
         pending_files=[
             SavedFileAttachment(
                 name="foo.pdf",
-                saved_path="/workspace/default/.qqfiles/foo.pdf",
+                saved_path="/suzu/brain/.qqfiles/foo.pdf",
                 original_file_id="f-1",
                 size=123,
             )
@@ -366,7 +366,7 @@ def test_build_context_header_appends_single_file_hint() -> None:
     assert "Please check" in header
     assert (
         "[SYSTEM: The user attached a file. It has been saved at "
-        "/workspace/default/.qqfiles/foo.pdf]" in header
+        "/suzu/brain/.qqfiles/foo.pdf]" in header
     )
 
 
@@ -382,13 +382,13 @@ def test_build_context_header_appends_multi_file_hint() -> None:
         pending_files=[
             SavedFileAttachment(
                 name="foo.pdf",
-                saved_path="/workspace/default/.qqfiles/foo.pdf",
+                saved_path="/suzu/brain/.qqfiles/foo.pdf",
                 original_file_id="f-1",
                 size=123,
             ),
             SavedFileAttachment(
                 name="bar.csv",
-                saved_path="/workspace/default/.qqfiles/bar.csv",
+                saved_path="/suzu/brain/.qqfiles/bar.csv",
                 original_file_id="f-2",
                 size=456,
             ),
@@ -396,8 +396,8 @@ def test_build_context_header_appends_multi_file_hint() -> None:
     )
     header = build_context_header(parsed)
     assert "[SYSTEM: The user attached files. They have been saved at:" in header
-    assert "- /workspace/default/.qqfiles/foo.pdf" in header
-    assert "- /workspace/default/.qqfiles/bar.csv]" in header
+    assert "- /suzu/brain/.qqfiles/foo.pdf" in header
+    assert "- /suzu/brain/.qqfiles/bar.csv]" in header
 
 
 # --- build_context_header tests ---

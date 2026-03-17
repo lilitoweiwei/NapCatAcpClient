@@ -34,7 +34,7 @@ uv run python main.py /path/to/your.toml
 打开 `config.toml`，找到 `[agent]` 块：
 - `command`: ACP Agent 的可执行文件路径或命令名（例如 `"claude"`）。
 - `args`: 传递给 Agent 的启动参数（例如 `["--experimental-acp"]`）。
-- `workspace`: 固定工作区路径（默认 `"/workspace/default"`）。ncat 启动时会确保该目录存在，所有 session 都只会使用这个工作区，不允许在聊天中切换工作区。
+- `workspace`: 固定工作区路径（默认 `"/suzu/brain"`）。ncat 启动时会确保该目录存在，所有 session 都只会使用这个工作区，不允许在聊天中切换工作区。
 - `acp_stdio_read_limit_mb`: ncat 从 Agent 的 ACP 标准输出中读取单条 JSON 消息时的大小上限，默认 `128`。当 Agent 会返回很大的工具输入/输出时，可以调大这个值。
 - `log_extra_context_env_var`: 可选环境变量名。若配置，ncat 会在每次拉起 Agent 前，把一个 JSON object 写入该环境变量，供外部 wrapper 记录额外日志上下文。
 
@@ -75,7 +75,7 @@ uv run python main.py /path/to/your.toml
 - 私聊里的文件-only消息会先落盘到当前 chat workspace 下的 `.qqfiles/`，然后提示用户继续发送说明。
 - 私聊里的图片-only消息也会先缓冲，不会立刻触发 Agent。
 - 只有当用户后续发送第一条带文本的消息时，ncat 才会把累计的文件和图片一起并入这轮 prompt。
-- 文件会通过系统提示文本附加给 Agent，例如 `[SYSTEM: The user attached a file. It has been saved at /workspace/default/.qqfiles/foo.pdf]`。
+- 文件会通过系统提示文本附加给 Agent，例如 `[SYSTEM: The user attached a file. It has been saved at /suzu/brain/.qqfiles/foo.pdf]`。
 - 若 Agent 支持图片，所有图片都会先统一预处理，再以内联 ACP 图片块发送：默认目标是压缩到 `ux.max_inline_image_mb = 2` MiB 以内；非透明图会转为 JPEG，透明图优先尝试 PNG optimize，若仍超预算则转为 WebP。
 - `/new`、NapCat 断开和 pending TTL 过期都会清空尚未消费的附件缓冲。
 

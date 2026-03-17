@@ -415,7 +415,7 @@ async def test_status_without_session_reports_unknowns(handler_env) -> None:
     await handler.handle_message(_private_event(111, "A", "/status"), BOT_ID)
 
     assert len(mock_agent.calls) == 0
-    assert "工作区: default" in replies.last_text
+    assert "工作区: brain" in replies.last_text
     assert "连接: 已连接" in replies.last_text
     assert "会话: 未创建" in replies.last_text
     assert "未知（首次创建会话后可见）" in replies.last_text

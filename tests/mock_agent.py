@@ -147,7 +147,7 @@ class MockAgentManager:
         self.next_session_modes[chat_id] = mode_id
 
     def get_workspace_cwd(self, chat_id: str) -> str:
-        return self.workspace_cwds.get(chat_id, "/workspace/default")
+        return self.workspace_cwds.get(chat_id, "/suzu/brain")
 
     async def close_session(self, chat_id: str) -> None:
         self.closed_sessions.add(chat_id)

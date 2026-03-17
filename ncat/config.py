@@ -24,10 +24,8 @@ class AgentConfig:
     command: str = "claude"
     # Arguments to pass to the agent (e.g. ["--experimental-acp"])
     args: list[str] = field(default_factory=list)
-    # Root directory under which all workspaces are created
-    workspace_root: str = "/workspace"
-    # Default workspace name used when /new is called without an argument
-    default_workspace: str = "default"
+    # Fixed workspace path used for every session.
+    workspace: str = "/workspace/default"
     # Extra environment variables for the agent process (merged with system env)
     env: dict[str, str] = field(default_factory=dict)
     # Optional env var name used to pass a JSON object of extra log context
@@ -139,8 +137,12 @@ def load_config(path: str | Path = "config.toml") -> NcatConfig:
     agent_raw = dict(raw.get("agent", {}))
     if "cwd" in agent_raw:
         raise ValueError(
-            "[agent].cwd has been removed; use [agent].workspace_root and "
-            "[agent].default_workspace instead"
+            "[agent].cwd has been removed; use [agent].workspace instead"
+        )
+    if "workspace_root" in agent_raw or "default_workspace" in agent_raw:
+        raise ValueError(
+            "[agent].workspace_root and [agent].default_workspace have been removed; "
+            "use [agent].workspace instead"
         )
     agent_raw.setdefault("initialize_timeout_seconds", 300.0)
     agent_raw.setdefault("retry_interval_seconds", 10.0)

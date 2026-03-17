@@ -22,25 +22,21 @@ async def main() -> None:
     setup_logging(config.logging)
     info_event(logger, "service_start", "ncat starting up", config_path=config_path)
 
-    # Ensure workspace directories exist
-    workspace_root = Path(config.agent.workspace_root).expanduser().resolve()
-    workspace_root.mkdir(parents=True, exist_ok=True)
-    default_workspace = workspace_root / config.agent.default_workspace
-    default_workspace.mkdir(parents=True, exist_ok=True)
+    # Ensure workspace directory exists
+    workspace = Path(config.agent.workspace).expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
     info_event(
         logger,
         "workspace_ready",
-        "workspace directories ready",
-        workspace_root=str(workspace_root),
-        default_workspace=str(default_workspace),
+        "workspace directory ready",
+        workspace=str(workspace),
     )
 
     # Initialize agent manager (no connection at startup; connect on first user message)
     agent_manager = AgentManager(
         command=config.agent.command,
         args=config.agent.args,
-        workspace_root=str(workspace_root),
-        default_workspace=config.agent.default_workspace,
+        workspace=str(workspace),
         max_reply_text_length=config.ux.max_reply_text_length,
         reply_split_start_length=config.ux.reply_split_start_length,
         env=config.agent.env or None,

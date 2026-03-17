@@ -76,8 +76,7 @@ class AgentManager:
         self,
         command: str,
         args: list[str],
-        workspace_root: str,
-        default_workspace: str,
+        workspace: str,
         max_reply_text_length: int = 500,
         reply_split_start_length: int = 300,
         env: dict[str, str] | None = None,
@@ -89,9 +88,7 @@ class AgentManager:
     ) -> None:
         self._command = command
         self._args = args
-        self._workspace_root = Path(workspace_root).expanduser().resolve()
-        self._default_workspace = default_workspace
-        self._default_workspace_path = self._resolve_workspace_path(default_workspace)
+        self._workspace_path = str(Path(workspace).expanduser().resolve())
         self._max_reply_text_length = max_reply_text_length
         self._reply_split_start_length = reply_split_start_length
         self._env = env
@@ -107,8 +104,8 @@ class AgentManager:
         # Multi-connection management: chat_id -> AgentConnection
         self._connections: dict[str, AgentConnection] = {}
 
-        # One-time cwd for the next session creation only.
-        self._next_session_cwd: dict[str, str] = {}
+        # One-time agent selection for the next session creation only.
+        self._next_session_mode: dict[str, str] = {}
 
         # PromptRunner callbacks invoked when a user-visible event boundary arrives.
         self._visible_event_notifiers: dict[str, asyncio.Task[None] | None] = {}
@@ -227,29 +224,12 @@ class AgentManager:
 
         return queued
 
-    def _resolve_workspace_path(self, workspace: str | None) -> str:
-        """Resolve a workspace name to an absolute path under workspace_root."""
-        name = self._default_workspace if workspace is None else workspace.strip()
-        if not name:
-            name = self._default_workspace
-
-        candidate = Path(name)
-        if candidate.is_absolute():
-            raise ValueError("工作区名称不能是绝对路径。")
-
-        resolved = (self._workspace_root / candidate).resolve()
-        try:
-            resolved.relative_to(self._workspace_root)
-        except ValueError as exc:
-            raise ValueError("工作区名称不能逃逸出 workspace_root。") from exc
-        return str(resolved)
-
     def _get_connection_cwd(self, chat_id: str) -> str:
         """Choose the cwd used when starting the agent subprocess for a chat."""
         conn = self._connections.get(chat_id)
         if conn and conn.workspace_cwd is not None:
             return conn.workspace_cwd
-        return self._next_session_cwd.get(chat_id, self._default_workspace_path)
+        return self._workspace_path
 
     def get_workspace_cwd(self, chat_id: str) -> str:
         """Return the workspace path currently selected for the chat."""
@@ -260,11 +240,27 @@ class AgentManager:
         return self._workspace_name_from_cwd(self.get_workspace_cwd(chat_id))
 
     def _workspace_name_from_cwd(self, cwd: str) -> str:
-        """Return the workspace-relative name for a resolved cwd."""
-        try:
-            return Path(cwd).resolve().relative_to(self._workspace_root).as_posix()
-        except ValueError:
-            return Path(cwd).name
+        """Return the display name for a resolved cwd."""
+        return Path(cwd).resolve().name
+
+    def set_next_session_mode(self, chat_id: str, mode_id_or_none: str | None) -> None:
+        """Set or clear the one-shot agent selection for the next session."""
+        if mode_id_or_none is None:
+            self._next_session_mode.pop(chat_id, None)
+            return
+
+        mode_id = mode_id_or_none.strip()
+        if not mode_id:
+            self._next_session_mode.pop(chat_id, None)
+            return
+
+        conn = self._connections.get(chat_id)
+        available_ids = [mode.id for mode in (conn.available_modes if conn else [])]
+        if available_ids and mode_id not in available_ids:
+            available = ", ".join(available_ids)
+            raise ValueError(f"未找到 agent：{mode_id}。可用 agents: {available}")
+
+        self._next_session_mode[chat_id] = mode_id
 
     def _get_or_create_connection(self, chat_id: str) -> AgentConnection:
         """Get or create an AgentConnection for the given chat_id.
@@ -444,10 +440,6 @@ class AgentManager:
 
         return await self._create_session(chat_id)
 
-    def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
-        """Set cwd for the next session creation only (used by /new [<workspace>])."""
-        self._next_session_cwd[chat_id] = self._resolve_workspace_path(dir_or_none)
-
     def _cache_session_metadata(self, chat_id: str, session) -> None:
         conn = self._connections.get(chat_id)
         if conn is None:
@@ -511,11 +503,7 @@ class AgentManager:
         if acp_conn is None:
             raise RuntimeError(MSG_AGENT_NOT_CONNECTED)
 
-        cwd = (
-            self._next_session_cwd.pop(chat_id, None)
-            or conn.workspace_cwd
-            or self._default_workspace_path
-        )
+        cwd = conn.workspace_cwd or self._workspace_path
         Path(cwd).mkdir(parents=True, exist_ok=True)
         conn.workspace_cwd = cwd
         conn.agent_process.set_cwd(cwd)
@@ -581,6 +569,14 @@ class AgentManager:
             mcp_servers=mcp_servers_payload,
         )
         self._cache_session_metadata(chat_id, session)
+        next_mode = self._next_session_mode.pop(chat_id, None)
+        if next_mode is not None:
+            available_ids = [mode.id for mode in conn.available_modes]
+            if available_ids and next_mode not in available_ids:
+                available = ", ".join(available_ids)
+                raise ValueError(f"未找到 agent：{next_mode}。可用 agents: {available}")
+            await acp_conn.set_session_mode(session_id=session.session_id, mode_id=next_mode)
+            conn.current_mode_id = next_mode
         session_id = session.session_id
         conn.active_session_id = session_id
         conn.active_turn_session_id = None
@@ -592,6 +588,7 @@ class AgentManager:
             chat_id=chat_id,
             session_id=session_id,
             cwd=cwd,
+            mode=conn.current_mode_id,
         )
         return session_id
 

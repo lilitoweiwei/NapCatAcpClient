@@ -354,14 +354,14 @@ async def test_agent_not_connected_message_reply(handler_env) -> None:
 
 
 async def test_agent_not_connected_new_reply(handler_env) -> None:
-    """Test that when agent is not connected, /new still succeeds and records workspace state."""
+    """Test that when agent is not connected, /new still succeeds."""
     handler, mock_agent, replies = handler_env
     mock_agent._is_running = False
 
     await handler.handle_message(_private_event(111, "A", "/new"), BOT_ID)
     assert "新会话" in replies.last_text
     assert "private:111" in mock_agent.closed_sessions
-    assert mock_agent.next_session_cwds["private:111"] is None
+    assert "private:111" not in mock_agent.next_session_modes
 
 
 async def test_command_new_closes_session(handler_env) -> None:
@@ -374,18 +374,18 @@ async def test_command_new_closes_session(handler_env) -> None:
     assert mock_agent.disconnect_calls == ["private:111"]
 
 
-async def test_command_new_invalid_workspace(handler_env) -> None:
-    """Test /new reports validation errors from the agent manager."""
+async def test_command_new_invalid_agent(handler_env) -> None:
+    """Test /new reports agent validation errors from the agent manager."""
     handler, mock_agent, replies = handler_env
 
-    def _fail(chat_id: str, dir_or_none: str | None) -> None:
-        raise ValueError("工作区名称不能逃逸出 workspace_root。")
+    def _fail(chat_id: str, mode_id_or_none: str | None) -> None:
+        raise ValueError("未找到 agent：ghost。可用 agents: build, reviewer")
 
-    mock_agent.set_next_session_cwd = _fail
+    mock_agent.set_next_session_mode = _fail
 
-    await handler.handle_message(_private_event(111, "A", "/new ../bad"), BOT_ID)
+    await handler.handle_message(_private_event(111, "A", "/new ghost"), BOT_ID)
 
-    assert replies.last_text == "工作区无效：工作区名称不能逃逸出 workspace_root。"
+    assert replies.last_text == "未找到 agent：ghost。可用 agents: build, reviewer\n\n当前 Agent: 未知（首次创建会话后可见）\n可用 Agents: 暂无（首次创建会话后可见）"
     assert "private:111" not in mock_agent.closed_sessions
 
 
@@ -449,7 +449,7 @@ async def test_agent_without_name_lists_current_and_available_modes(handler_env)
 
     assert "当前 Agent: build" in replies.last_text
     assert "- reviewer - Review changes" in replies.last_text
-    assert "/new 后会恢复为 OpenCode 默认 agent" in replies.last_text
+    assert "/new 后会恢复为默认 agent，也可以用 /new <agent> 为新 session 指定 agent" in replies.last_text
 
 
 async def test_agent_switches_current_session_mode(handler_env) -> None:
@@ -648,7 +648,7 @@ async def test_new_forces_new_session_after_next_message(handler_env) -> None:
     await handler.handle_message(_private_event(111, "A", "/agent reviewer"), BOT_ID)
     assert mock_agent.current_mode_ids["private:111"] == "reviewer"
 
-    await handler.handle_message(_private_event(111, "A", "/new alt"), BOT_ID)
+    await handler.handle_message(_private_event(111, "A", "/new build"), BOT_ID)
     await handler.handle_message(_private_event(111, "A", "hello again"), BOT_ID)
     second_session_id = mock_agent.prompt_session_ids[-1][1]
 
@@ -656,8 +656,19 @@ async def test_new_forces_new_session_after_next_message(handler_env) -> None:
     assert mock_agent.current_mode_ids["private:111"] == "build"
     assert mock_agent.new_session_calls == [
         ("private:111", None),
-        ("private:111", "alt"),
+        ("private:111", "build"),
     ]
+
+
+async def test_new_with_agent_starts_next_session_in_requested_mode(handler_env) -> None:
+    handler, mock_agent, replies = handler_env
+
+    await handler.handle_message(_private_event(111, "A", "/new reviewer"), BOT_ID)
+    await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)
+
+    assert mock_agent.new_session_calls == [("private:111", "reviewer")]
+    assert mock_agent.current_mode_ids["private:111"] == "reviewer"
+    assert "下次将使用 agent：reviewer" in replies.texts[0]
 
 
 # --- Busy rejection tests ---

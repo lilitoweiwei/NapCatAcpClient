@@ -18,12 +18,12 @@ class ReplyCollector:
         self.texts.append(text)
 
 
-async def test_new_command_sets_workspace_and_replies() -> None:
+async def test_new_command_sets_next_session_agent_and_replies() -> None:
     replies = ReplyCollector()
     agent = MockAgentManager()
 
     matched = await command_registry.execute(
-        "/new demo",
+        "/new reviewer",
         chat_id="private:1",
         event={},
         reply_fn=replies,
@@ -31,13 +31,13 @@ async def test_new_command_sets_workspace_and_replies() -> None:
     )
 
     assert matched is True
-    assert replies.texts == ["已创建新会话，AI 上下文已清空。"]
-    assert agent.next_session_cwds["private:1"] == "demo"
+    assert replies.texts == ["已创建新会话，AI 上下文已清空。下次将使用 agent：reviewer"]
+    assert agent.next_session_modes["private:1"] == "reviewer"
     assert "private:1" in agent.closed_sessions
     assert agent.disconnect_calls == ["private:1"]
 
 
-async def test_new_command_without_workspace_keeps_default_selection() -> None:
+async def test_new_command_without_agent_keeps_default_selection() -> None:
     replies = ReplyCollector()
     agent = MockAgentManager()
 
@@ -51,7 +51,7 @@ async def test_new_command_without_workspace_keeps_default_selection() -> None:
 
     assert matched is True
     assert replies.texts == ["已创建新会话，AI 上下文已清空。"]
-    assert agent.next_session_cwds["private:1"] is None
+    assert "private:1" not in agent.next_session_modes
     assert agent.disconnect_calls == ["private:1"]
 
 
@@ -61,7 +61,7 @@ async def test_new_command_cancels_active_turn_before_disconnect() -> None:
     cancelled: list[str] = []
 
     matched = await command_registry.execute(
-        "/new demo",
+        "/new reviewer",
         chat_id="private:1",
         event={},
         reply_fn=replies,
@@ -74,17 +74,17 @@ async def test_new_command_cancels_active_turn_before_disconnect() -> None:
     assert agent.disconnect_calls == ["private:1"]
 
 
-async def test_new_command_reports_workspace_validation_errors() -> None:
+async def test_new_command_reports_agent_validation_errors() -> None:
     replies = ReplyCollector()
     agent = MockAgentManager()
 
-    def _raise(chat_id: str, dir_or_none: str | None) -> None:
-        raise ValueError("工作区名称不能逃逸出 workspace_root。")
+    def _raise(chat_id: str, mode_id_or_none: str | None) -> None:
+        raise ValueError("未找到 agent：ghost。可用 agents: build, reviewer")
 
-    agent.set_next_session_cwd = _raise
+    agent.set_next_session_mode = _raise
 
     matched = await command_registry.execute(
-        "/new ../bad",
+        "/new ghost",
         chat_id="private:1",
         event={},
         reply_fn=replies,
@@ -92,7 +92,7 @@ async def test_new_command_reports_workspace_validation_errors() -> None:
     )
 
     assert matched is True
-    assert replies.texts == ["工作区无效：工作区名称不能逃逸出 workspace_root。"]
+    assert replies.texts == ["未找到 agent：ghost。可用 agents: build, reviewer\n\n当前 Agent: 未知（首次创建会话后可见）\n可用 Agents: 暂无（首次创建会话后可见）"]
     assert "private:1" not in agent.closed_sessions
 
 

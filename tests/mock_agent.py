@@ -50,8 +50,8 @@ class MockAgentManager:
         self.ensure_connection_error: BaseException | None = None
         # Agent capability flag (mirrors real AgentManager.supports_image)
         self._supports_image: bool = False
-        # One-shot workspace selected by /new for the next session
-        self.next_session_cwds: dict[str, str | None] = {}
+        # One-shot agent selected by /new for the next session
+        self.next_session_modes: dict[str, str] = {}
         self.workspace_cwds: dict[str, str] = {}
         # Connection establishment bookkeeping
         self.ensure_connection_calls: list[str] = []
@@ -113,7 +113,8 @@ class MockAgentManager:
             self._session_counter += 1
             session_id = f"mock_session_{self._session_counter}_{chat_id}"
             self.session_ids_by_chat[chat_id] = session_id
-            self.new_session_calls.append((chat_id, self.next_session_cwds.get(chat_id)))
+            next_mode = self.next_session_modes.pop(chat_id, None)
+            self.new_session_calls.append((chat_id, next_mode))
             self.current_mode_ids.setdefault(chat_id, "build")
             self.available_modes_by_chat.setdefault(
                 chat_id,
@@ -122,14 +123,31 @@ class MockAgentManager:
                     SessionModeInfo(id="reviewer", name="reviewer", description="Review changes"),
                 ],
             )
+            if next_mode is not None:
+                available_ids = [mode.id for mode in self.available_modes_by_chat.get(chat_id, [])]
+                if available_ids and next_mode not in available_ids:
+                    available = ", ".join(available_ids)
+                    raise ValueError(f"未找到 agent：{next_mode}。可用 agents: {available}")
+                self.current_mode_ids[chat_id] = next_mode
         return session_id
 
-    def set_next_session_cwd(self, chat_id: str, dir_or_none: str | None) -> None:
-        """Record the requested workspace for the next session."""
-        self.next_session_cwds[chat_id] = dir_or_none
+    def set_next_session_mode(self, chat_id: str, mode_id_or_none: str | None) -> None:
+        """Record the requested agent for the next session."""
+        if mode_id_or_none is None:
+            self.next_session_modes.pop(chat_id, None)
+            return
+        mode_id = mode_id_or_none.strip()
+        if not mode_id:
+            self.next_session_modes.pop(chat_id, None)
+            return
+        available_ids = [mode.id for mode in self.available_modes_by_chat.get(chat_id, [])]
+        if available_ids and mode_id not in available_ids:
+            available = ", ".join(available_ids)
+            raise ValueError(f"未找到 agent：{mode_id}。可用 agents: {available}")
+        self.next_session_modes[chat_id] = mode_id
 
     def get_workspace_cwd(self, chat_id: str) -> str:
-        return self.workspace_cwds.get(chat_id, f"/workspace/{self.next_session_cwds.get(chat_id) or 'default'}")
+        return self.workspace_cwds.get(chat_id, "/workspace/default")
 
     async def close_session(self, chat_id: str) -> None:
         self.closed_sessions.add(chat_id)

@@ -22,7 +22,7 @@ _MSG_NEW_SESSION = "已创建新会话，AI 上下文已清空。"
 _MSG_STOPPED = "已中断当前 AI 思考。"
 _MSG_NO_ACTIVE = "当前没有进行中的 AI 思考。"
 _MSG_HELP = "直接发送文字即可与 AI 对话。"
-_MSG_AGENT_RESET = "提示：/agent 只作用于当前 session；发送 /new 后会恢复为 OpenCode 默认 agent。"
+_MSG_AGENT_RESET = "提示：/agent 只作用于当前 session；发送 /new 后会恢复为默认 agent，也可以用 /new <agent> 为新 session 指定 agent。"
 
 
 def _format_status(agent_manager: AgentManager, chat_id: str) -> str:
@@ -67,13 +67,13 @@ def _format_agent_listing(agent_manager: AgentManager, chat_id: str) -> str:
 
 
 @command_registry.register(
-    pattern=r"^/new(?:\s+(?P<dir>\S+))?$",
-    help_text="/new [workspace] - 创建新会话并切换到指定工作区（会恢复默认 agent）",
+    pattern=r"^/new(?:\s+(?P<name>\S+))?$",
+    help_text="/new [agent] - 创建新会话；可选为新 session 指定 agent",
     name="new",
 )
 async def handle_new(
     chat_id: str,
-    dir: str | None,
+    name: str | None,
     event: dict,
     reply_fn,
     agent_manager: AgentManager,
@@ -81,19 +81,19 @@ async def handle_new(
     pending_input_store=None,
     **kwargs,
 ) -> None:
-    """Handle /new and /new <workspace> commands.
+    """Handle /new and /new <agent> commands.
 
     Args:
         chat_id: QQ chat ID
-        dir: Optional workspace name
+        name: Optional agent name for the next session
         event: Raw event dict
         reply_fn: Callback to send reply
         agent_manager: Agent manager instance
     """
     try:
-        agent_manager.set_next_session_cwd(chat_id, dir)
+        agent_manager.set_next_session_mode(chat_id, name)
     except ValueError as exc:
-        await reply_fn(event, f"工作区无效：{exc}")
+        await reply_fn(event, str(exc) + "\n\n" + _format_agent_listing(agent_manager, chat_id))
         return
 
     if cancel_fn is not None:
@@ -105,13 +105,16 @@ async def handle_new(
     # Close current ACP session and disconnect
     await agent_manager.close_session(chat_id)
     await agent_manager.disconnect(chat_id)
-    await reply_fn(event, _MSG_NEW_SESSION)
+    if name:
+        await reply_fn(event, f"已创建新会话，AI 上下文已清空。下次将使用 agent：{name}")
+    else:
+        await reply_fn(event, _MSG_NEW_SESSION)
     info_event(
         logger,
         "command_new",
         "New session requested",
         chat_id=chat_id,
-        workspace=dir,
+        agent=name,
     )
 
 

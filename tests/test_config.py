@@ -41,3 +41,14 @@ def test_load_config_rejects_non_positive_acp_stdio_read_limit_mb(tmp_path: Path
 
     with pytest.raises(ValueError, match="acp_stdio_read_limit_mb"):
         load_config(config_path)
+
+
+def test_load_config_rejects_legacy_workspace_fields(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    _write_config(
+        config_path,
+        "[agent]\nworkspace_root = \"/workspace\"\ndefault_workspace = \"default\"\n",
+    )
+
+    with pytest.raises(ValueError, match="workspace_root"):
+        load_config(config_path)

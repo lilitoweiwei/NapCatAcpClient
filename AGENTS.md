@@ -23,5 +23,5 @@ This repo owns the NapCat ACP bridge.
 ## Boundaries
 
 - Keep this repo focused on QQ message flow, session orchestration, and ACP transport.
-- Use `[agent].workspace_root` and `[agent].default_workspace` for workspace selection; do not add `[agent].cwd` back.
+- Use the fixed `[agent].workspace` path for session cwd; do not reintroduce runtime workspace switching or `[agent].cwd`.
 - The current foreground model is one chat -> one agent subprocess -> one ACP session until `/new` or a hard failure.

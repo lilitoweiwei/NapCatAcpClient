@@ -136,8 +136,7 @@ def _manager(tmp_path: Path) -> AgentManager:
     return AgentManager(
         command="claude",
         args=[],
-        workspace_root=str(tmp_path),
-        default_workspace="default",
+        workspace=str(tmp_path / "default"),
         log_extra_context_env_var="SUZU_WRAPPER_EXTRA_LOG",
     )
 
@@ -155,8 +154,7 @@ def test_connection_uses_configured_acp_stdio_limit(tmp_path: Path) -> None:
     manager = AgentManager(
         command="claude",
         args=[],
-        workspace_root=str(tmp_path),
-        default_workspace="default",
+        workspace=str(tmp_path / "default"),
         acp_stdio_read_limit_mb=256,
     )
 
@@ -165,35 +163,33 @@ def test_connection_uses_configured_acp_stdio_limit(tmp_path: Path) -> None:
     assert conn.agent_process.stdio_read_limit_bytes == 256 * 1024 * 1024
 
 
-def test_set_next_session_cwd_uses_default_workspace(tmp_path: Path) -> None:
+def test_set_next_session_mode_records_requested_agent(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
 
-    manager.set_next_session_cwd("private:1", None)
+    manager.set_next_session_mode("private:1", "reviewer")
 
-    assert manager._next_session_cwd["private:1"] == str(tmp_path / "default")
+    assert manager._next_session_mode["private:1"] == "reviewer"
 
 
-def test_set_next_session_cwd_rejects_workspace_escape(tmp_path: Path) -> None:
+def test_set_next_session_mode_clears_on_none(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
 
-    with pytest.raises(ValueError):
-        manager.set_next_session_cwd("private:1", "../escape")
+    manager.set_next_session_mode("private:1", "reviewer")
+    manager.set_next_session_mode("private:1", None)
 
-    with pytest.raises(ValueError):
-        manager.set_next_session_cwd("private:1", "/tmp/escape")
+    assert "private:1" not in manager._next_session_mode
 
 
 @pytest.mark.asyncio
-async def test_create_session_uses_absolute_workspace_path(tmp_path: Path) -> None:
+async def test_create_session_uses_fixed_workspace_path(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
-    manager.set_next_session_cwd("private:1", "project-a")
     conn = manager._get_or_create_connection("private:1")
     acp_conn = DummyAcpConnection()
     conn.agent_process._conn = acp_conn
 
     session_id = await manager.get_or_create_session("private:1")
 
-    workspace = tmp_path / "project-a"
+    workspace = tmp_path / "default"
     assert session_id == "sess-1"
     assert workspace.is_dir()
     assert conn.workspace_cwd == str(workspace)
@@ -208,7 +204,6 @@ async def test_ensure_connection_creates_workspace_before_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager = _manager(tmp_path)
-    manager.set_next_session_cwd("private:1", "nested/project")
     started_in: list[Path] = []
 
     async def fake_start_once(
@@ -233,11 +228,11 @@ async def test_ensure_connection_creates_workspace_before_start(
 
     await manager.ensure_connection("private:1")
 
-    assert started_in == [tmp_path / "nested/project"]
+    assert started_in == [tmp_path / "default"]
     conn = manager._connections["private:1"]
     assert conn.spawn_id is not None
     assert conn.extra_log_context["chat_id"] == "private:1"
-    assert conn.extra_log_context["workspace_name"] == "nested/project"
+    assert conn.extra_log_context["workspace_name"] == "default"
 
 
 def test_build_log_extra_context_requires_json_env_name(tmp_path: Path) -> None:
@@ -400,6 +395,24 @@ async def test_set_session_mode_creates_session_and_updates_current_mode(tmp_pat
     assert acp_conn.calls == [(str(tmp_path / "default"), [])]
     assert acp_conn.mode_calls == [("sess-1", "reviewer")]
     assert conn.current_mode_id == "reviewer"
+
+
+@pytest.mark.asyncio
+async def test_next_session_mode_applies_after_new_session(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    conn = manager._get_or_create_connection("private:1")
+    acp_conn = DummyAcpConnection()
+    conn.agent_process._conn = acp_conn
+    conn.agent_process._process = cast(Any, DummyProcess())
+
+    manager.set_next_session_mode("private:1", "reviewer")
+
+    session_id = await manager.get_or_create_session("private:1")
+
+    assert session_id == "sess-1"
+    assert acp_conn.mode_calls == [("sess-1", "reviewer")]
+    assert conn.current_mode_id == "reviewer"
+    assert "private:1" not in manager._next_session_mode
 
 
 def test_get_chat_status_reports_workspace_and_usage(tmp_path: Path) -> None:

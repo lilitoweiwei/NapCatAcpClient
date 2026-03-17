@@ -12,10 +12,8 @@ port = 8282
 command = "claude"
 # Arguments to pass to the agent (e.g. ["--experimental-acp"] for gemini).
 args = []
-# Root directory under which all workspaces are created.
-workspace_root = "/workspace"
-# Default workspace name used when /new is sent without an argument.
-default_workspace = "default"
+# Fixed workspace path used for every session.
+workspace = "/workspace/default"
 # Maximum size in MiB for one ACP stdio JSON line read from the agent.
 # Increase this if the agent returns very large tool inputs/outputs in a single event.
 acp_stdio_read_limit_mb = 128

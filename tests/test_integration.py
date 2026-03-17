@@ -116,8 +116,7 @@ async def _real_streaming_stack(
     agent_manager = AgentManager(
         command="claude",
         args=[],
-        workspace_root=str(workspace_root),
-        default_workspace="default",
+        workspace=str(workspace_root / "default"),
         max_reply_text_length=max_reply_text_length,
         reply_split_start_length=reply_split_start_length,
     )
@@ -559,7 +558,7 @@ async def test_new_forces_new_session_after_next_message(full_stack) -> None:
     await mock.recv_api_call(timeout=5.0)
     first_session_id = mock_agent.prompt_session_ids[-1][1]
 
-    await mock.send_private_message(111, "Alice", "/new alt")
+    await mock.send_private_message(111, "Alice", "/new reviewer")
     new_call = await mock.recv_api_call(timeout=3.0)
     assert new_call is not None
     assert "新会话" in new_call["params"]["message"][0]["data"]["text"]
@@ -569,6 +568,7 @@ async def test_new_forces_new_session_after_next_message(full_stack) -> None:
     second_session_id = mock_agent.prompt_session_ids[-1][1]
 
     assert first_session_id != second_session_id
+    assert mock_agent.current_mode_ids["private:111"] == "reviewer"
 
 
 async def test_multiple_users_isolated(full_stack) -> None:

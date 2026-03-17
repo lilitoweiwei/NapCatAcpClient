@@ -13,7 +13,7 @@ command = "claude"
 # Arguments to pass to the agent (e.g. ["--experimental-acp"] for gemini).
 args = []
 # Fixed workspace path used for every session.
-workspace = "/suzu/brain"
+workspace = "/suzu"
 # Maximum size in MiB for one ACP stdio JSON line read from the agent.
 # Increase this if the agent returns very large tool inputs/outputs in a single event.
 acp_stdio_read_limit_mb = 128

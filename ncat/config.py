@@ -25,7 +25,7 @@ class AgentConfig:
     # Arguments to pass to the agent (e.g. ["--experimental-acp"])
     args: list[str] = field(default_factory=list)
     # Fixed workspace path used for every session.
-    workspace: str = "/suzu/brain"
+    workspace: str = "/suzu"
     # Extra environment variables for the agent process (merged with system env)
     env: dict[str, str] = field(default_factory=dict)
     # Optional env var name used to pass a JSON object of extra log context

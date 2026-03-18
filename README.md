@@ -72,10 +72,10 @@ uv run python main.py /path/to/your.toml
 
 ## 私聊附件缓冲
 
-- 私聊里的文件-only消息会先落盘到当前 chat workspace 下的 `.qqfiles/`，然后提示用户继续发送说明。
+- 私聊里的文件-only消息会先落盘到集中式模块 inbox `mods/qq-file-ingress/workspace/inbox/`，然后提示用户继续发送说明。
 - 私聊里的图片-only消息也会先缓冲，不会立刻触发 Agent。
 - 只有当用户后续发送第一条带文本的消息时，ncat 才会把累计的文件和图片一起并入这轮 prompt。
-- 文件会通过系统提示文本附加给 Agent，例如 `[SYSTEM: The user attached a file. It has been saved at /suzu/.qqfiles/foo.pdf]`。
+- 文件会通过系统提示文本附加给 Agent，例如 `[SYSTEM: The user attached a file. It has been saved at /suzu/mods/qq-file-ingress/workspace/inbox/foo.pdf]`。
 - 若 Agent 支持图片，所有图片都会先统一预处理，再以内联 ACP 图片块发送：默认目标是压缩到 `ux.max_inline_image_mb = 2` MiB 以内；非透明图会转为 JPEG，透明图优先尝试 PNG optimize，若仍超预算则转为 WebP。
 - `/new`、NapCat 断开和 pending TTL 过期都会清空尚未消费的附件缓冲。
 

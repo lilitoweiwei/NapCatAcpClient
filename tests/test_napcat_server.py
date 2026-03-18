@@ -1,6 +1,7 @@
 """Tests for the WebSocket server module."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -12,6 +13,7 @@ from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio
+TEST_INBOX_DIR = "/tmp/ncat-test-inbox"
 
 
 @pytest_asyncio.fixture
@@ -22,6 +24,7 @@ async def server_and_mock():
         host="127.0.0.1",
         port=0,  # OS assigns a free port
         agent_manager=mock_agent,
+        file_inbox_dir=TEST_INBOX_DIR,
     )
 
     # Start server in background; we need to find the actual port
@@ -255,7 +258,7 @@ async def test_disconnect_clears_pending_inputs(server_and_mock, monkeypatch, tm
     mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
 
     async def _fake_download_private_file(**kwargs):
-        inbox = tmp_path / "default" / ".qqfiles"
+        inbox = Path(kwargs["inbox_dir"])
         inbox.mkdir(parents=True, exist_ok=True)
         target = inbox / "foo.pdf"
         target.write_text("pdf")

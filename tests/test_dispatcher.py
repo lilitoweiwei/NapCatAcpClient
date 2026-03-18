@@ -15,6 +15,7 @@ from tests.mock_napcat import MockNapCat
 pytestmark = pytest.mark.asyncio
 
 BOT_ID = MockNapCat.BOT_ID
+TEST_INBOX_DIR = "/tmp/ncat-test-inbox"
 
 
 class ReplyCollector:
@@ -44,6 +45,7 @@ async def handler_env():
     handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
+        file_inbox_dir=TEST_INBOX_DIR,
     )
 
     yield handler, mock_agent, replies
@@ -59,6 +61,7 @@ async def timeout_env():
         reply_fn=replies,
         thinking_notify_seconds=0.3,
         thinking_long_notify_seconds=0.8,
+        file_inbox_dir=TEST_INBOX_DIR,
     )
 
     yield handler, mock_agent, replies
@@ -152,7 +155,7 @@ async def test_file_only_message_is_buffered(handler_env, monkeypatch, tmp_path:
     mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
 
     async def _fake_download_private_file(**kwargs):
-        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox = Path(kwargs["inbox_dir"])
         inbox.mkdir(parents=True, exist_ok=True)
         target = inbox / "foo.pdf"
         target.write_text("pdf")
@@ -253,7 +256,7 @@ async def test_next_text_consumes_buffered_files_and_images(handler_env, monkeyp
     mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
 
     async def _fake_download_private_file(**kwargs):
-        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox = Path(kwargs["inbox_dir"])
         inbox.mkdir(parents=True, exist_ok=True)
         target = inbox / "foo.pdf"
         target.write_text("pdf")
@@ -309,7 +312,7 @@ async def test_new_clears_pending_attachments(handler_env, monkeypatch, tmp_path
     mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
 
     async def _fake_download_private_file(**kwargs):
-        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox = Path(kwargs["inbox_dir"])
         inbox.mkdir(parents=True, exist_ok=True)
         target = inbox / "foo.pdf"
         target.write_text("pdf")
@@ -774,6 +777,7 @@ async def test_internal_exception_sends_error_reply(monkeypatch) -> None:
     handler = MessageDispatcher(
         agent_manager=mock_agent,
         reply_fn=replies,
+        file_inbox_dir=TEST_INBOX_DIR,
     )
 
     await handler.handle_message(_private_event(111, "A", "hello"), BOT_ID)

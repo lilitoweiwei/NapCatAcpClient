@@ -1,4 +1,4 @@
-"""Helpers for receiving and saving QQ files into chat workspaces."""
+"""Helpers for receiving and saving QQ files into the shared inbox."""
 
 from __future__ import annotations
 
@@ -29,9 +29,9 @@ def sanitize_filename(name: str) -> str:
     return candidate or "qq-file"
 
 
-def ensure_inbox_dir(workspace_cwd: str, inbox_dirname: str) -> Path:
-    """Create and return the per-workspace QQ inbox directory."""
-    inbox = Path(workspace_cwd).expanduser().resolve() / inbox_dirname
+def ensure_inbox_dir(inbox_dir: str) -> Path:
+    """Create and return the centralized QQ inbox directory."""
+    inbox = Path(inbox_dir).expanduser().resolve()
     inbox.mkdir(parents=True, exist_ok=True)
     return inbox
 
@@ -75,6 +75,8 @@ def guess_mime_type_from_name(name: str) -> str | None:
     """Best-effort MIME guess from a filename or URL path."""
     mime_type, _ = mimetypes.guess_type(name)
     return mime_type
+
+
 async def _download_to_path(url: str, target_path: Path, timeout_seconds: float) -> None:
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout_seconds) as client:
         response = await client.get(url)
@@ -85,15 +87,14 @@ async def _download_to_path(url: str, target_path: Path, timeout_seconds: float)
 async def download_private_file(
     attachment: FileAttachment,
     *,
-    workspace_cwd: str,
-    inbox_dirname: str,
+    inbox_dir: str,
     timeout_seconds: float,
     max_file_size_mb: int | None,
     get_file: GetFileFn | None = None,
 ) -> SavedFileAttachment:
-    """Persist a private QQ file into the chat workspace and return its local metadata."""
-    inbox_dir = ensure_inbox_dir(workspace_cwd, inbox_dirname)
-    target_path = allocate_target_path(inbox_dir, attachment.name)
+    """Persist a private QQ file into the centralized inbox and return its local metadata."""
+    inbox_root = ensure_inbox_dir(inbox_dir)
+    target_path = allocate_target_path(inbox_root, attachment.name)
 
     resolved_url = attachment.url.strip()
     local_source: Path | None = None
@@ -139,7 +140,7 @@ async def best_effort_download_private_file(**kwargs) -> SavedFileAttachment | N
         warning_event(
             logger,
             "file_download_fail",
-            "Failed to save QQ file into workspace inbox",
+            "Failed to save QQ file into centralized inbox",
             file_id=attachment.file_id,
             file_name=attachment.name,
             err=str(exc),

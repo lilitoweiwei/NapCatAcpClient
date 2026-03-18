@@ -52,3 +52,24 @@ def test_load_config_rejects_legacy_workspace_fields(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="workspace_root"):
         load_config(config_path)
+
+
+def test_load_config_uses_default_file_ingress_inbox_dir(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    _write_config(config_path, "")
+
+    config = load_config(config_path)
+
+    assert config.file_ingress.inbox_dir == "/suzu/mods/qq-file-ingress/workspace/inbox"
+
+
+def test_load_config_reads_custom_file_ingress_inbox_dir(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    _write_config(
+        config_path,
+        "[file_ingress]\ninbox_dir = \"/tmp/qq-inbox\"\n",
+    )
+
+    config = load_config(config_path)
+
+    assert config.file_ingress.inbox_dir == "/tmp/qq-inbox"

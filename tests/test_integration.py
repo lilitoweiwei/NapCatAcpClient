@@ -20,6 +20,7 @@ from tests.mock_agent import MockAgentManager
 from tests.mock_napcat import MockNapCat
 
 pytestmark = pytest.mark.asyncio
+TEST_INBOX_DIR = "/tmp/ncat-test-inbox"
 
 
 class _FakeStdin:
@@ -126,6 +127,7 @@ async def _real_streaming_stack(
         agent_manager=agent_manager,
         max_reply_text_length=max_reply_text_length,
         reply_split_start_length=reply_split_start_length,
+        file_inbox_dir=TEST_INBOX_DIR,
     )
 
     ws_server = await websockets.serve(server._handler_ws, "127.0.0.1", 0)
@@ -152,6 +154,7 @@ async def full_stack():
         host="127.0.0.1",
         port=0,
         agent_manager=mock_agent,
+        file_inbox_dir=TEST_INBOX_DIR,
     )
 
     ws_server = await websockets.serve(server._handler_ws, "127.0.0.1", 0)
@@ -390,7 +393,7 @@ async def test_private_file_and_image_wait_for_first_text(full_stack, monkeypatc
     mock_agent.workspace_cwds["private:111"] = str(tmp_path / "default")
 
     async def _fake_download_private_file(**kwargs):
-        inbox = Path(kwargs["workspace_cwd"]) / ".qqfiles"
+        inbox = Path(kwargs["inbox_dir"])
         inbox.mkdir(parents=True, exist_ok=True)
         target = inbox / "foo.pdf"
         target.write_text("pdf")

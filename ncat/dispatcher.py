@@ -50,7 +50,7 @@ class MessageDispatcher:
         thinking_long_notify_seconds: float = 30,
         image_download_timeout: float = 15.0,
         file_ingress_enabled: bool = True,
-        file_inbox_dirname: str = ".qqfiles",
+        file_inbox_dir: str = "/suzu/mods/qq-file-ingress/workspace/inbox",
         file_download_timeout: float = 30.0,
         pending_ttl_seconds: float = 1800.0,
         max_file_size_mb: int | None = None,
@@ -62,7 +62,7 @@ class MessageDispatcher:
         # Agent manager
         self._agent_manager = agent_manager
         self._file_ingress_enabled = file_ingress_enabled
-        self._file_inbox_dirname = file_inbox_dirname
+        self._file_inbox_dir = file_inbox_dir
         self._file_download_timeout = file_download_timeout
         self._max_file_size_mb = max_file_size_mb
         self._get_file_fn = get_file_fn
@@ -240,12 +240,10 @@ class MessageDispatcher:
         saved_files = []
         file_failed = False
         if self._file_ingress_enabled:
-            workspace_cwd = self._agent_manager.get_workspace_cwd(chat_id)
             for attachment in parsed.files:
                 saved = await best_effort_download_private_file(
                     attachment=attachment,
-                    workspace_cwd=workspace_cwd,
-                    inbox_dirname=self._file_inbox_dirname,
+                    inbox_dir=self._file_inbox_dir,
                     timeout_seconds=self._file_download_timeout,
                     max_file_size_mb=self._max_file_size_mb,
                     get_file=self._get_file_data,

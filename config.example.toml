@@ -66,10 +66,10 @@ image_download_timeout = 15.0
 max_inline_image_mb = 2
 
 [file_ingress]
-# Enable private-chat file receipt into per-workspace `.qqfiles/` directories.
+# Enable private-chat file receipt into the centralized qq-file-ingress module inbox.
 enabled = true
-# Directory created under each chat workspace for incoming QQ files.
-inbox_dirname = ".qqfiles"
+# Absolute directory used for incoming QQ files.
+inbox_dir = "/suzu/mods/qq-file-ingress/workspace/inbox"
 # Timeout (seconds) for downloading private files from NapCat URLs.
 download_timeout = 30.0
 # Buffered file-only or image-only inputs expire after this many seconds.

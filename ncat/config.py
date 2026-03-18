@@ -82,8 +82,8 @@ class FileIngressConfig:
 
     # Enable private-chat file download and workspace persistence.
     enabled: bool = True
-    # Directory created under each workspace to store received QQ files.
-    inbox_dirname: str = ".qqfiles"
+    # Absolute directory where received QQ files are stored.
+    inbox_dir: str = "/suzu/mods/qq-file-ingress/workspace/inbox"
     # Timeout (seconds) for downloading files from NapCat-provided URLs.
     download_timeout: float = 30.0
     # How long attachment-only messages stay buffered waiting for text.

@@ -66,7 +66,7 @@ async def main() -> None:
         image_download_timeout=config.ux.image_download_timeout,
         max_inline_image_mb=config.ux.max_inline_image_mb,
         file_ingress_enabled=config.file_ingress.enabled,
-        file_inbox_dirname=config.file_ingress.inbox_dirname,
+        file_inbox_dir=config.file_ingress.inbox_dir,
         file_download_timeout=config.file_ingress.download_timeout,
         pending_ttl_seconds=config.file_ingress.pending_ttl_seconds,
         max_file_size_mb=config.file_ingress.max_file_size_mb,
